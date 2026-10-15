@@ -3,9 +3,8 @@
 // escapes every interpolated value.
 
 import { html, raw } from '/js/core/html.js';
-import { icon, LOGO } from '/js/core/icons.js';
+import { icon } from '/js/core/icons.js';
 import { snapshot, settle } from '/js/core/motion.js';
-import { lockFrame, mountLock, lockFlow, liftLock, lockError, SILHOUETTE, stamp, z } from '/js/core/lock.js';
 
 // ---------------------------------------------------------------------------------------------
 // Small helpers
@@ -52,8 +51,6 @@ function relTime(v) {
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const initials = (name = '') => name.replace(/^(dr|mr|mrs|ms|prof)\.?\s+/i, '').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'; };
 
 // Per-browser preferences only (theme, remembered lab name for the splash). Never anything sensitive.
@@ -163,12 +160,26 @@ function hideSplash() {
 const SAMPLE_STAGE = { Received: 1, 'In Testing': 2, 'In Review': 3, Approved: 3, Reported: 4 };
 const SAMPLE_LABEL = { Received: 'Received', 'In Testing': 'Testing', 'In Review': 'In review', Approved: 'Finalising', Reported: 'Reported', Cancelled: 'Cancelled', Disposed: 'Closed' };
 const SAMPLE_TONE = { Received: 'info', 'In Testing': 'accent', 'In Review': 'accent', Approved: 'accent', Reported: 'ok', Cancelled: 'bad', Disposed: '' };
-const SUB_TONE = { Submitted: 'info', Acknowledged: 'accent', Received: 'ok', Declined: 'bad', Withdrawn: '' };
-const SUB_LABEL = { Submitted: 'Submitted', Acknowledged: 'Expected', Received: 'Received', Declined: 'Declined', Withdrawn: 'Withdrawn' };
+// A submission's lifecycle as data: what the client reads for each status, whether it is still open, and the reason
+// shown when it stopped early. The timeline below ends at Received; after that the samples have their own progress.
+const SUBMISSION = {
+  Submitted: { label: 'Sent to lab', tone: 'info', open: true },
+  Acknowledged: { label: 'Expected', tone: 'accent', open: true },
+  Received: { label: 'Received', tone: 'ok' },
+  Declined: { label: 'Declined', tone: 'bad', stop: 'The lab declined this shipment.' },
+  Withdrawn: { label: 'Withdrawn', tone: '', stop: 'You withdrew this shipment. The lab is not expecting it.' },
+};
+const SUBMISSION_STEPS = [
+  { status: 'Submitted', title: 'Sent to the lab', sub: 'You told us the box is on its way', at: 'created_at' },
+  { status: 'Acknowledged', title: 'Lab is expecting it', sub: 'We confirm the shipment and watch for it', at: 'acknowledged_at' },
+  { status: 'Received', title: 'Box received', sub: 'Samples are logged and checked in', at: 'received_at' },
+];
+const PRIORITY_HINT = { Standard: 'Normal turnaround', Rush: 'Faster, may cost more', Urgent: 'We call you first' };
 const REQ_TONE = { Submitted: 'info', 'Under review': 'accent', 'Proposal sent': 'warn', Accepted: 'ok', Declined: 'bad' };
 
 const pill = (label, tone = '') => html`<span class="pill ${tone}">${label}</span>`;
 const samplePill = (s) => pill(SAMPLE_LABEL[s] || s, SAMPLE_TONE[s]);
+const subPill = (s) => pill(SUBMISSION[s].label, SUBMISSION[s].tone);
 const progress = (status) => {
   const n = SAMPLE_STAGE[status] || 0;
   return html`<div class="progress" role="img" aria-label="${`Step ${n} of 4`}">${[1, 2, 3, 4].map((i) => html`<i class="${i <= n ? 'on' : ''}"></i>`)}</div>`;
@@ -185,114 +196,82 @@ const trustFooter = () => html`<div class="foot-trust">
 // Sign-in and password change
 // ---------------------------------------------------------------------------------------------
 
-// The same lock screen as the laboratory's own sign-in (core/lock.js), in the client's words.
-const LOCKED = { message: 'Your session is locked. Present your authorization key.', sub: 'Your authorization key is your portal password' };
-
-function portalLock(panel, { ghost = 'Access', message = LOCKED.message, sub = LOCKED.sub } = {}) {
-  app.innerHTML = String(lockFrame({
-    labName: state.info?.lab_name || 'Client portal',
-    ghost, panel, message, sub,
-    variant: 'portal',
-    os: raw('Client <b>portal</b>'),
-    tagline: ['Track every sample', 'Signed certificates', 'Talk to the lab'],
-    chips: [location.protocol === 'https:' ? 'Encrypted connection' : 'Access-controlled', 'Audit trail on', 'Your records only'],
-  }));
+// Sign-in, first-time password and lockout share one plain card: the client's words, no lab jargon.
+function authCard(body) {
+  const lab = state.info?.lab_name || 'Client portal';
+  app.innerHTML = String(html`<main class="auth">
+    <div class="auth-in">
+      <div class="auth-brand">${MARK(30)}<span><b>${lab}</b><span class="micro">Client portal</span></span></div>
+      <div class="card card-pad auth-card">${body}</div>
+      ${trustFooter()}
+    </div>
+  </main>`);
   hideSplash();
-  const ctl = mountLock(app);
-  return { ctl, flow: lockFlow(ctl, { idle: message, idleSub: sub }) };
 }
+
+const labContact = () => {
+  const { lab_phone: phone, lab_email: email } = state.info || {};
+  if (!phone && !email) return 'contact the laboratory';
+  return html`${phone ? html`call <b class="nowrap">${phone}</b>` : ''}${phone && email ? ' or ' : ''}${email ? html`email <a href="${`mailto:${email}`}">${email}</a>` : ''}`;
+};
 
 function showSignIn(message) {
   state.me = null;
   const info = state.info || {};
-  const lab = info.lab_name || 'Client portal';
-  document.title = `Sign in · ${lab}`;
-  const contact = [info.lab_email, info.lab_phone].filter(Boolean);
+  document.title = `Sign in · ${info.lab_name || 'Client portal'}`;
   const demo = info.demo ? info.demo_accounts || [] : [];
-  const { ctl, flow } = portalLock(html`
-    <div class="lp-head"><span class="micro">■ Client sign-in</span><span class="lp-org">${info.demo ? 'Demo data' : 'Client portal'}</span></div>
-    <form class="lp-form" id="signin" novalidate>
-      <div class="operator">
-        <div class="op-photo" data-photo>${SILHOUETTE}<span class="op-initials" data-initials hidden></span><em>Classified</em></div>
-        <div class="op-main">
-          <div class="op-tags"><span class="op-tag">Client</span><span class="micro">Registered email</span><span class="lp-lights" aria-hidden="true"><i></i><i></i><i></i></span></div>
-          <label class="op-name"><span class="sr">Email</span><input name="email" type="email" inputmode="email" required autofocus autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="Email"></label>
-          <div class="op-loaded">${LOGO}<span class="micro"><b data-loaded>Awaiting client</b><br>Identity unverified</span></div>
-        </div>
-      </div>
-      <dl class="op-profile">
-        <dt>Laboratory</dt><dd>${lab}</dd>
-        <dt>Portal</dt><dd>${location.host}</dd>
-        <dt>Locked at</dt><dd>${stamp()}</dd>
-        <dt>Keymap</dt><dd>${(navigator.language || 'en').toUpperCase()}</dd>
-      </dl>
-      ${message ? html`<div class="lp-notice">${ic('info', 15)}<span>${message}</span></div>` : ''}
-      <div class="lp-keyhead"><span class="micro">▬ Authorization key</span><span class="micro" data-attempts>Your password</span></div>
-      <label class="auth-key"><span class="sr">Password</span><input type="password" name="password" required autocomplete="current-password" placeholder="Enter password"><button class="ak-btn" type="submit"><span>Request</span>${ic('arrowRight', 14)}</button></label>
-      <div class="lp-dots" aria-hidden="true" data-dots></div>
-      <div class="form-error" role="alert" hidden></div>
+  authCard(html`
+    <h1>Sign in</h1>
+    <p class="lead">Use the email the laboratory invited you with.</p>
+    ${message ? html`<div class="alert alert-info">${ic('info', 16)}<span>${message}</span></div>` : ''}
+    <form id="signin" novalidate>
+      <label class="field"><span class="label">Email</span><input class="input" name="email" type="email" inputmode="email" required autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="you@company.com"></label>
+      <label class="field"><span class="label">Password</span><input class="input" name="password" type="password" required autocomplete="current-password"></label>
+      <div class="form-error"></div>
+      <button class="btn btn-primary btn-block" type="submit">Sign in</button>
     </form>
-    ${contact.length ? html`<p class="lp-help">Need access or help? ${contact.map((c, i) => html`${i ? ' · ' : ''}${c.includes('@') ? html`<a href="${`mailto:${c}`}">${c}</a>` : c}`)}</p>` : ''}
-    ${demo.length ? html`<div class="demo-ops">
-      <div class="lp-keyhead"><span class="micro">▬ Demo clients</span><span class="micro">One click · key demo1234</span></div>
-      <div class="demo-grid">${demo.map((a) => html`<button type="button" data-demo="${a.email}" data-name="${a.full_name}"><span class="dg-ini">${initials(a.full_name)}</span><span><strong>${a.full_name}</strong><small>${a.client_name}</small></span></button>`)}</div>
+    <p class="help">Forgot your password, or need an account? The lab resets it for you: ${labContact()}.</p>
+    ${demo.length ? html`<div class="demo">
+      <div class="micro">Demo accounts · password demo1234</div>
+      ${demo.map((a) => html`<button type="button" data-demo="${a.email}"><span class="ini">${initials(a.full_name)}</span><span><b>${a.full_name}</b><small>${a.client_name}</small></span></button>`)}
     </div>` : ''}`);
   const form = $('#signin');
-  const email = form.email;
-  const pass = form.password;
-  const attempts = $('[data-attempts]', form);
-  const showClient = (name) => {
-    const i = initials(name);
-    const ini = $('[data-initials]', form);
-    ini.textContent = i;
-    ini.hidden = !i;
-    $('[data-photo]', form).classList.toggle('known', !!i);
-    $('[data-loaded]', form).textContent = i ? 'Client record loaded ●' : 'Awaiting client';
-  };
-  email.addEventListener('input', () => {
-    const v = email.value.trim();
-    showClient(demo.find((a) => a.email === v)?.full_name || v.split('@')[0].replace(/[._-]+/g, ' '));
-  });
-  let tries = 0;
-  let busy = false;
-  const submit = async () => {
-    if (busy) return;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
     const d = formData(form);
-    if (!d.email || !d.password) {
-      lockError(form, 'Enter your email and password');
-      (d.email ? pass : email).focus();
+    const errBox = $('.form-error', form);
+    if (!d.email.trim() || !d.password) {
+      errBox.innerHTML = String(html`<div class="alert alert-bad" role="alert">${ic('alert', 16)}<span>Enter your email and password.</span></div>`);
+      (d.email.trim() ? form.password : form.email).focus();
       return;
     }
-    lockError(form, '');
-    busy = true;
-    attempts.textContent = `Attempt ${z(++tries)} · recorded`;
-    try {
-      await flow.run(() => post('/login', { email: d.email, password: d.password }));
-      await boot();
-    } catch (e) {
-      if (e.handled) return;
-      lockError(form, e.message);
-      $('[data-dots]', form).innerHTML = String(raw('<i></i>'.repeat(Math.min(tries, 8))));
-      pass.select();
-    } finally {
-      busy = false;
-    }
-  };
-  form.addEventListener('submit', (e) => { e.preventDefault(); submit(); });
-  // A demo client "types" their key: each character ripples the helix, then the request goes out.
-  $$('[data-demo]').forEach((b) => b.addEventListener('click', async () => {
-    if (busy) return;
-    flow.endLockdown();
-    email.value = b.dataset.demo;
-    showClient(b.dataset.name);
-    pass.value = '';
-    for (const ch of 'demo1234') {
-      pass.value += ch;
-      ctl.helix.pulse();
-      if (!reducedMotion()) await sleep(38);
-    }
-    submit();
+    const ok = await submitting(form, async () => {
+      try {
+        await post('/login', { email: d.email.trim(), password: d.password });
+      } catch (err) {
+        if (err.status === 423) { showLocked(err.message); err.handled = true; }
+        throw err;
+      }
+      return true;
+    }, 'Signing in');
+    if (ok) await boot();
+    else if (form.isConnected) form.password.select();
+  });
+  $$('[data-demo]').forEach((b) => b.addEventListener('click', () => {
+    form.email.value = b.dataset.demo;
+    form.password.value = 'demo1234';
+    form.requestSubmit();
   }));
+  form.email.focus();
+}
+
+function showLocked(message) {
+  authCard(html`
+    <h1>Too many tries</h1>
+    <p class="lead">${message}</p>
+    <div class="alert alert-warn">${ic('info', 16)}<span>If you cannot remember your password, the laboratory can reset it now: ${labContact()}.</span></div>
+    <button class="btn btn-block js-back" type="button">Back to sign in</button>`);
+  $('.js-back').addEventListener('click', () => showSignIn());
 }
 
 function passwordFields(firstTime) {
@@ -310,29 +289,21 @@ async function changePassword(form) {
 
 function showPasswordChange() {
   document.title = `Choose your password · ${state.info?.lab_name || 'Client portal'}`;
-  const { flow } = portalLock(html`
-    <div class="lp-head"><span class="micro">■ Credential rotation</span><span class="lp-org">Required</span></div>
-    <h1 class="lp-title">Choose your password</h1>
-    <p class="lp-sub">For your security, replace the temporary password you were given with one only you know.</p>
-    <form class="lp-form" id="pw" novalidate>
-      <div class="form-error" role="alert" hidden></div>
+  authCard(html`
+    <h1>Choose your password</h1>
+    <p class="lead">The temporary password the lab gave you works once. Pick your own to continue.</p>
+    <form id="pw" novalidate>
       ${passwordFields(true)}
+      <div class="form-error"></div>
       <button class="btn btn-primary btn-block" type="submit">Save and continue</button>
-      <button class="btn btn-quiet btn-block js-signout" type="button">Sign out</button>
-    </form>`, { ghost: 'Rotate', message: 'Credential rotation required before the session unseals.', sub: 'Choose a password only you know' });
+      <button class="btn btn-quiet btn-block js-signout" type="button">Not now, sign out</button>
+    </form>`);
   const form = $('#pw');
+  form.current.focus();
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const d = formData(form);
-    if (d.next !== d.again) { lockError(form, 'The two new passwords do not match'); return; }
-    lockError(form, '');
-    try {
-      await flow.run(() => post('/password', { current: d.current, next: d.next }));
-      toast('Password saved');
-      await boot();
-    } catch (err) {
-      if (!err.handled) lockError(form, err.message);
-    }
+    const ok = await submitting(form, async () => { await changePassword(form); return true; }, 'Saving');
+    if (ok) { toast('Password saved'); await boot(); }
   });
   $('.js-signout', form).addEventListener('click', signOut);
 }
@@ -435,7 +406,7 @@ async function route() {
     else if (a === 'samples') view = await samplesList(query.tab || 'open');
     else if (a === 'coa' && b) view = await coaView(+b);
     else if (a === 'submit') view = await submitForm();
-    else if (a === 'submissions' && b) view = await submissionDetail(+b);
+    else if (a === 'submissions' && b) view = await submissionDetail(+b, query);
     else if (a === 'requests' && b === 'new') view = await requestForm();
     else if (a === 'requests' && b) view = await requestDetail(+b);
     else if (a === 'requests') view = await requestsList();
@@ -475,7 +446,7 @@ async function overview() {
     { n: o.counts.unread, l: o.counts.unread === 1 ? 'Unread message' : 'Unread messages', href: '#/messages' },
   ];
   const open = [
-    ...o.submissions.map((s) => ({ href: `#/submissions/${s.id}`, code: s.code, title: `Sample shipment · ${plural(s.sample_count, 'sample')}`, status: pill(SUB_LABEL[s.status], SUB_TONE[s.status]), at: s.created_at })),
+    ...o.submissions.map((s) => ({ href: `#/submissions/${s.id}`, code: s.code, title: `Sample shipment · ${plural(s.sample_count, 'sample')}`, status: subPill(s.status), at: s.created_at })),
     ...o.requests.map((r) => ({ href: `#/requests/${r.id}`, code: r.code, title: r.title, status: pill(r.status, REQ_TONE[r.status]), at: r.created_at })),
   ].sort((x, y) => (y.at > x.at ? 1 : -1));
   return {
@@ -541,7 +512,7 @@ async function samplesList(tab) {
           <td data-label="Samples">${plural(s.sample_count, 'sample')}${s.method_count ? ` · ${plural(s.method_count, 'test')}` : ''}</td>
           <td data-label="Courier">${s.courier || '—'}${s.tracking_no ? html`<div class="tiny muted mono">${s.tracking_no}</div>` : ''}</td>
           <td data-label="Submitted">${fmtDate(s.created_at)}</td>
-          <td>${pill(SUB_LABEL[s.status], SUB_TONE[s.status])}</td></tr>`)}
+          <td>${subPill(s.status)}</td></tr>`)}
       </tbody></table></div>` : empty('box', 'No shipments yet.', html`<a class="btn btn-sm" href="#/submit">Submit samples</a>`))
     : (rows.length ? html`<div class="table-wrap"><table class="table responsive"><thead><tr><th>Sample</th><th>Batch / lot</th><th>Your reference</th><th>Progress</th><th>${tab === 'reported' ? 'Reported' : 'Due'}</th><th></th></tr></thead><tbody>
         ${rows.map((s) => html`<tr>
@@ -651,138 +622,199 @@ async function coaView(id) {
 // Sample submission
 // ---------------------------------------------------------------------------------------------
 
-function sampleRow(i, v = {}) {
-  const f = (name, label, ph) => html`<label><span class="label">${label}</span><input class="input" name="${`s.${name}`}" value="${v[name] || ''}" placeholder="${ph}" ${name === 'description' ? raw('required') : ''}></label>`;
-  return html`<div class="srow" data-row>
-    <div class="n">${i + 1}</div>
-    ${f('description', 'Description', 'e.g. Tablets, 500 mg')}
-    ${f('batch_no', 'Batch / lot', 'Batch')}
-    ${f('client_ref', 'Your reference', 'Your ref.')}
-    ${f('quantity', 'Quantity', 'e.g. 100 tabs')}
-    ${f('container', 'Container', 'e.g. Bottle')}
-    <button class="btn btn-quiet btn-sm remove" type="button" title="Remove sample" aria-label="Remove sample">${ic('x', 15)}</button>
-  </div>`;
+const MAX_SAMPLES = 200;
+const SAMPLE_FIELDS = ['description', 'batch_no', 'client_ref', 'quantity', 'container'];
+
+function sampleRow(v = {}) {
+  const more = (name, ph) => html`<input class="input" name="${`s.${name}`}" value="${v[name] || ''}" placeholder="${ph}" aria-label="${ph}">`;
+  const open = ['batch_no', 'client_ref', 'quantity', 'container'].some((k) => v[k]);
+  return html`<li class="srow" data-row>
+    <div class="srow-main"><span class="n"></span><input class="input" name="s.description" value="${v.description || ''}" placeholder="What is it? e.g. Atorvastatin API, lot 2026-118" aria-label="Sample description"><button class="btn btn-quiet btn-sm remove" type="button" aria-label="Remove sample">${ic('x', 15)}</button></div>
+    <div class="srow-more" ${open ? '' : raw('hidden')}>${more('batch_no', 'Batch / lot')}${more('client_ref', 'Your reference')}${more('quantity', 'Quantity, e.g. 5 g')}${more('container', 'Container')}</div>
+    <button class="linkish js-more" type="button">${open ? 'Hide details' : 'Add batch, quantity, container'}</button>
+  </li>`;
 }
+
+// Optional details hide behind "+ chips"; each chip opens its fields, and "Remove" clears them again so nothing hidden is sent.
+const EXTRAS = [
+  { key: 'project', chip: 'Project', when: (lk) => lk.projects.length, fields: (lk) => html`<label class="field"><span class="label">Project</span><select class="select" name="project_id"><option value="">No specific project</option>${lk.projects.map((p) => html`<option value="${p.id}">${p.code} · ${p.title}</option>`)}</select></label>` },
+  { key: 'sample_type', chip: 'Sample type', fields: (lk) => html`<label class="field"><span class="label">Sample type</span><select class="select" name="sample_type"><option value="">Choose</option>${lk.sampleTypes.map((t) => html`<option>${t}</option>`)}</select></label>` },
+  { key: 'storage', chip: 'Storage', fields: (lk) => html`<label class="field"><span class="label">Keep it at</span><select class="select" name="storage"><option value="">Choose</option>${lk.storageConditions.map((t) => html`<option>${t}</option>`)}</select></label>` },
+  { key: 'shipping', chip: 'Courier & tracking', fields: () => html`<div class="grid-3">
+    <label class="field"><span class="label">Courier</span><input class="input" name="courier" placeholder="e.g. FedEx Priority"></label>
+    <label class="field"><span class="label">Tracking number</span><input class="input" name="tracking_no"></label>
+    <label class="field"><span class="label">Ship date</span><input class="input" type="date" name="ship_date" min="${todayIso()}"></label>
+  </div>` },
+  { key: 'notes', chip: 'Note to lab', fields: () => html`<label class="field"><span class="label">Anything else we should know</span><textarea class="textarea" name="notes" placeholder="Handling, hazards, who to call"></textarea></label>` },
+];
 
 async function submitForm() {
   const lk = await lookups();
+  const extras = EXTRAS.filter((x) => !x.when || x.when(lk));
   return {
     title: 'Submit samples',
     html: html`
-      <div class="page-head"><div><div class="eyebrow">${state.me.client.name}</div><h1>Submit samples</h1><p class="sub">Tell us what you are sending before it ships. We confirm every submission and let you know the moment it arrives.</p></div></div>
-      <form class="card" id="submission" novalidate>
-        <div class="form-section">
-          <div class="about"><h2><span class="step-n"></span>Samples</h2><p>One line per container or batch. Up to 200 at a time.</p></div>
-          <div>
-            <div class="srows-head"><span>#</span><span>Description</span><span>Batch / lot</span><span>Your ref.</span><span>Quantity</span><span>Container</span><span></span></div>
-            <div class="js-rows">${sampleRow(0)}</div>
-            <button class="btn btn-sm js-add" type="button" style="margin-top:12px">${ic('plus', 15)} Add another sample</button>
+      <div class="page-head"><div><div class="eyebrow">New shipment</div><h1>Tell us what is coming</h1><p class="sub">Only the sample names are required. Everything else helps us be ready faster.</p></div></div>
+      <form class="card slip" id="submission" novalidate>
+        <section class="slip-sec">
+          <h2><span class="step-n">01</span>What is in the box</h2>
+          <p class="slip-sub">One line per sample. Add batch and quantity if you have them handy.</p>
+          <ol class="srows js-rows">${sampleRow()}</ol>
+          <div class="row wrap">
+            <button class="btn btn-sm js-add" type="button">${ic('plus', 15)} Add another sample</button>
+            <button class="linkish js-paste" type="button">Paste a list</button>
           </div>
-        </div>
-        <div class="form-section">
-          <div class="about"><h2><span class="step-n"></span>Tests</h2><p>Choose from our current validated methods. Not sure? Leave this empty and describe what you need in the notes.</p></div>
-          <div>
-            ${lk.methods.length > 6 ? html`<input class="input js-filter" type="search" placeholder="Filter tests" style="margin-bottom:10px" aria-label="Filter tests">` : ''}
-            <div class="method-pick">${lk.methods.map((m) => html`<label class="check" data-text="${`${m.code} ${m.title} ${m.technique}`.toLowerCase()}"><input type="checkbox" name="method_ids" data-list="1" value="${m.id}"><span><b>${m.title}</b><span>${m.code} · ${m.technique}${m.tat_days ? ` · typically ${m.tat_days} working days` : ''}</span></span></label>`)}</div>
+          <div class="paste" hidden>
+            <label class="field"><span class="label">One sample per line</span><textarea class="textarea js-paste-text" rows="5" placeholder="${'Atorvastatin API, lot 2026-118\nAtorvastatin API, lot 2026-119'}"></textarea></label>
+            <button class="btn btn-sm js-paste-add" type="button">Add these</button>
           </div>
+        </section>
+        <section class="slip-sec">
+          <h2><span class="step-n">02</span>What should we test</h2>
+          <p class="slip-sub">Pick any that apply, or leave it to the project plan.</p>
+          ${lk.methods.length > 6 ? html`<input class="input js-filter" type="search" placeholder="Filter tests" aria-label="Filter tests" style="margin-bottom:10px">` : ''}
+          <div class="chips">${lk.methods.map((m) => html`<label class="chip" data-text="${`${m.code} ${m.title} ${m.technique}`.toLowerCase()}" title="${`${m.code} · ${m.technique}${m.tat_days ? ` · typically ${m.tat_days} working days` : ''}`}"><input type="checkbox" name="method_ids" data-list="1" value="${m.id}"><span>${m.title}</span></label>`)}</div>
+        </section>
+        <section class="slip-sec">
+          <h2><span class="step-n">03</span>How fast</h2>
+          <div class="seg" role="radiogroup" aria-label="Priority">${lk.priorities.map((p) => html`<label><input type="radio" name="priority" value="${p}" ${p === 'Standard' ? raw('checked') : ''}><span>${p}</span></label>`)}</div>
+          <p class="slip-sub js-priority-hint" style="margin:8px 0 0">${PRIORITY_HINT.Standard}</p>
+        </section>
+        <section class="slip-sec">
+          <h2><span class="step-n">04</span>Anything else? <span class="opt">optional</span></h2>
+          <div class="extras">${extras.map((x) => html`<fieldset class="extra" data-extra="${x.key}" hidden><div class="extra-head"><span class="micro">${x.chip}</span><button class="linkish js-hide" type="button">Remove</button></div>${x.fields(lk)}</fieldset>`)}</div>
+          <div class="chips">${extras.map((x) => html`<button class="chip chip-add" type="button" data-show="${x.key}">+ ${x.chip}</button>`)}</div>
+        </section>
+        <div class="send-bar">
+          <span class="count js-count"></span>
+          <div class="form-error"></div>
+          <a class="btn btn-quiet" href="#/">Cancel</a>
+          <button class="btn btn-primary" type="submit">${ic('send', 16)} Send to lab</button>
         </div>
-        <div class="form-section">
-          <div class="about"><h2><span class="step-n"></span>Details</h2><p>How the samples should be handled once they are here.</p></div>
-          <div class="stack">
-            <div class="grid-2">
-              <label class="field"><span class="label">Project <span class="opt">(optional)</span></span><select class="select" name="project_id"><option value="">No specific project</option>${lk.projects.map((p) => html`<option value="${p.id}">${p.code} — ${p.title}</option>`)}</select></label>
-              <label class="field"><span class="label">Sample type</span><select class="select" name="sample_type"><option value="">Select…</option>${lk.sampleTypes.map((t) => html`<option>${t}</option>`)}</select></label>
-            </div>
-            <label class="field"><span class="label">Storage on arrival</span><select class="select" name="storage"><option value="">Select…</option>${lk.storageConditions.map((t) => html`<option>${t}</option>`)}</select></label>
-            <div class="field"><span class="label">Priority</span>
-              <div class="choice cols-3">${[['Standard', 'Our normal turnaround for each test.'], ['Rush', 'Ahead of the queue. Subject to confirmation; surcharge may apply.'], ['Urgent', 'Same or next working day where possible. Please call us as well.']].map(([p, d]) => html`<label><input type="radio" name="priority" value="${p}" ${p === 'Standard' ? raw('checked') : ''}><span class="t">${p}</span><span class="d">${d}</span></label>`)}</div>
-            </div>
-          </div>
-        </div>
-        <div class="form-section">
-          <div class="about"><h2><span class="step-n"></span>Shipping</h2><p>So reception can watch for the parcel.</p></div>
-          <div class="grid-3">
-            <label class="field"><span class="label">Courier</span><input class="input" name="courier" placeholder="e.g. FedEx Priority"></label>
-            <label class="field"><span class="label">Tracking number</span><input class="input" name="tracking_no"></label>
-            <label class="field"><span class="label">Ship date</span><input class="input" type="date" name="ship_date" value="${todayIso()}"></label>
-          </div>
-        </div>
-        <div class="form-section">
-          <div class="about"><h2><span class="step-n"></span>Notes</h2><p>Hazards, special handling, or anything we should know.</p></div>
-          <label class="field"><span class="sr-only">Notes</span><textarea class="textarea" name="notes" placeholder="Optional"></textarea></label>
-        </div>
-        <div class="form-actions"><div class="form-error grow" style="margin-right:auto"></div><a class="btn btn-quiet" href="#/">Cancel</a><button class="btn btn-primary" type="submit">${ic('send', 16)} Submit</button></div>
       </form>`,
     mount(root) {
       const form = $('#submission', root);
       const rows = $('.js-rows', form);
-      const renumber = () => $$('[data-row]', rows).forEach((r, i) => { $('.n', r).textContent = i + 1; $('.remove', r).hidden = $$('[data-row]', rows).length === 1; });
-      renumber();
+      const allRows = () => $$('[data-row]', rows);
+      const readRow = (r) => Object.fromEntries(SAMPLE_FIELDS.map((k) => [k, $(`[name="s.${k}"]`, r).value.trim()]));
+      const update = () => {
+        const list = allRows();
+        list.forEach((r, i) => { $('.n', r).textContent = i + 1; $('.remove', r).hidden = list.length === 1; });
+        $('.js-add', form).disabled = list.length >= MAX_SAMPLES;
+        const n = list.filter((r) => $('[name="s.description"]', r).value.trim()).length;
+        const tests = $$('[name=method_ids]:checked', form).length;
+        $('.js-count', form).innerHTML = String(n ? html`<b>${plural(n, 'sample')}</b>${tests ? `, ${plural(tests, 'test')}` : ''}` : html`Name at least one sample to send`);
+      };
+      const addRows = (values) => {
+        rows.insertAdjacentHTML('beforeend', values.map((v) => String(sampleRow(v))).join(''));
+        update();
+      };
+      update();
+      form.addEventListener('input', update);
       $('.js-add', form).addEventListener('click', () => {
-        const last = $$('[data-row]', rows).at(-1);
-        const carry = last ? { description: $('[name="s.description"]', last).value, container: $('[name="s.container"]', last).value, quantity: $('[name="s.quantity"]', last).value } : {};
-        rows.insertAdjacentHTML('beforeend', String(sampleRow(0, carry)));
-        renumber();
-        $$('[data-row]', rows).at(-1).querySelector('[name="s.batch_no"]').focus();
+        addRows([{}]);
+        $('[name="s.description"]', allRows().at(-1)).focus();
       });
-      rows.addEventListener('click', (e) => { const b = e.target.closest('.remove'); if (b) { b.closest('[data-row]').remove(); renumber(); } });
-      $('.js-filter', form)?.addEventListener('input', (e) => { const q = e.target.value.trim().toLowerCase(); $$('.method-pick .check', form).forEach((l) => { l.hidden = q && !l.dataset.text.includes(q); }); });
+      rows.addEventListener('click', (e) => {
+        const row = e.target.closest('[data-row]');
+        if (e.target.closest('.remove')) { row.remove(); update(); return; }
+        if (e.target.closest('.js-more')) {
+          const more = $('.srow-more', row);
+          more.hidden = !more.hidden;
+          e.target.textContent = more.hidden ? 'Add batch, quantity, container' : 'Hide details';
+          if (!more.hidden) $('input', more).focus();
+        }
+      });
+      $('.js-paste', form).addEventListener('click', () => { $('.paste', form).hidden = false; $('.js-paste-text', form).focus(); });
+      $('.js-paste-add', form).addEventListener('click', () => {
+        const box = $('.js-paste-text', form);
+        const lines = box.value.split('\n').map((l) => l.trim()).filter(Boolean);
+        allRows().filter((r) => !Object.values(readRow(r)).some(Boolean)).forEach((r) => r.remove());
+        addRows(lines.slice(0, MAX_SAMPLES - allRows().length).map((description) => ({ description })));
+        if (!allRows().length) addRows([{}]);
+        box.value = '';
+        $('.paste', form).hidden = true;
+      });
+      $('.js-filter', form)?.addEventListener('input', (e) => { const q = e.target.value.trim().toLowerCase(); $$('.chips .chip[data-text]', form).forEach((l) => { l.hidden = q && !l.dataset.text.includes(q); }); });
+      form.addEventListener('change', (e) => { if (e.target.name === 'priority') $('.js-priority-hint', form).textContent = PRIORITY_HINT[e.target.value] || ''; });
+      form.addEventListener('click', (e) => {
+        const show = e.target.closest('[data-show]');
+        if (show) {
+          show.hidden = true;
+          const box = $(`[data-extra="${show.dataset.show}"]`, form);
+          box.hidden = false;
+          $('input, select, textarea', box).focus();
+        }
+        const hide = e.target.closest('.js-hide');
+        if (hide) {
+          const box = hide.closest('[data-extra]');
+          $$('input, select, textarea', box).forEach((el) => { el.value = ''; });
+          box.hidden = true;
+          $(`[data-show="${box.dataset.extra}"]`, form).hidden = false;
+        }
+      });
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const d = formData(form);
-        const samples = $$('[data-row]', rows).map((r) => Object.fromEntries(['description', 'batch_no', 'client_ref', 'quantity', 'container'].map((k) => [k, $(`[name="s.${k}"]`, r).value])));
+        const samples = allRows().map(readRow).filter((r) => Object.values(r).some(Boolean));
         const body = { project_id: d.project_id || null, sample_type: d.sample_type || null, storage: d.storage || null, priority: d.priority, courier: d.courier, tracking_no: d.tracking_no, ship_date: d.ship_date || null, notes: d.notes, method_ids: (d.method_ids || []).map(Number), samples };
-        const res = await submitting(form, () => post('/submissions', body));
-        if (!res) return;
-        $('#main').innerHTML = String(html`<div class="view"><div class="card success">
-          <div class="badge">${ic('check', 26)}</div>
-          <h1>Submission ${res.code} received</h1>
-          <p>Thank you. We will review it and confirm here, usually within a few working hours.</p>
-          <ol class="next-steps">
-            <li>Label each container with the batch and reference you entered.</li>
-            <li>Put a note with <b>&nbsp;${res.code}&nbsp;</b> in the box so reception can match it.</li>
-            <li>We will message you when the parcel arrives and the samples are logged.</li>
-          </ol>
-          <div class="row" style="justify-content:center;margin-top:28px;flex-wrap:wrap"><a class="btn" href="${`#/submissions/${res.id}`}">View submission</a><a class="btn btn-primary" href="#/">Back to overview</a></div>
-        </div>${trustFooter()}</div>`);
-        window.scrollTo(0, 0);
+        const res = await submitting(form, async () => {
+          if (!samples.some((r) => r.description)) throw new Error('Tell us what at least one sample is.');
+          return post('/submissions', body);
+        }, 'Sending');
+        if (res) location.hash = `#/submissions/${res.id}?sent=1`;
       });
     },
   };
 }
 
-async function submissionDetail(id) {
+/** The shipment's path to the lab, ending at Received; a Declined or Withdrawn submission stops after its last step. */
+function submissionTimeline(s) {
+  const st = SUBMISSION[s.status];
+  const reachedTo = st.stop ? -1 : SUBMISSION_STEPS.findIndex((x) => x.status === s.status);
+  const steps = st.stop ? SUBMISSION_STEPS.filter((x) => s[x.at]) : SUBMISSION_STEPS;
+  return html`<ol class="timeline">
+    ${steps.map((x, i) => {
+      const done = st.stop || i <= reachedTo || !!s[x.at];
+      const now = !st.stop && i === reachedTo;
+      return html`<li class="${now ? 'now' : done ? 'done' : 'future'}"><i></i><b>${x.title}</b><span>${s[x.at] ? `${fmtDate(s[x.at])} · ` : ''}${x.sub}</span></li>`;
+    })}
+    ${st.stop ? html`<li class="stop now"><i></i><b>${st.label}</b><span>${fmtDate(s.updated_at)} · ${s.status_note || st.stop}</span></li>` : ''}
+  </ol>`;
+}
+
+async function submissionDetail(id, query) {
   const { submission: s, thread_id, can } = await api(`/submissions/${id}`);
-  const order = ['Submitted', 'Acknowledged', 'Received'];
-  const at = { Submitted: s.created_at, Acknowledged: s.acknowledged_at, Received: s.received_at };
-  const stopped = ['Declined', 'Withdrawn'].includes(s.status);
-  const reached = stopped ? 1 : order.indexOf(s.status) + 1;
+  const justSent = query.sent === '1' && SUBMISSION[s.status].open;
   return {
     title: s.code,
     html: html`
       <a class="back" href="#/samples?tab=shipments">${ic('arrowLeft', 15)} Shipments</a>
-      <div class="page-head">
-        <div><div class="eyebrow">Sample submission</div><h1 class="mono" style="font-family:var(--font)">${s.code}</h1><p class="sub">${plural(s.samples.length, 'sample')} · submitted ${fmtDateTime(s.created_at)}</p></div>
-        <div class="row">${thread_id ? html`<a class="btn" href="${`#/messages/${thread_id}`}">${ic('message', 16)} Conversation</a>` : ''}${can.withdraw ? html`<button class="btn js-withdraw" type="button">Withdraw</button>` : ''}</div>
-      </div>
+      ${justSent ? html`<section class="label-card">
+        <div class="micro">Your submission number</div>
+        <div class="big mono">${s.code}</div>
+        <p>Write <b>${s.code}</b> on the outside of the box, or print this page and put it inside. That is how we match the box to this notice.</p>
+        <div class="row wrap"><button class="btn btn-sm js-copy" type="button">Copy number</button><button class="btn btn-sm js-print" type="button">${ic('printer', 15)} Print</button></div>
+      </section>` : html`<div class="page-head">
+        <div><div class="eyebrow">Sample shipment</div><h1 class="mono" style="font-family:var(--font)">${s.code}</h1><p class="sub">${plural(s.samples.length, 'sample')} · sent ${fmtDateTime(s.created_at)}</p></div>
+        ${thread_id ? html`<a class="btn" href="${`#/messages/${thread_id}`}">${ic('message', 16)} Conversation</a>` : ''}
+      </div>`}
       <div class="stack">
         <section class="card card-pad">
-          <div class="row" style="justify-content:space-between;margin-bottom:18px"><h2>Status</h2>${pill(SUB_LABEL[s.status], SUB_TONE[s.status])}</div>
-          <ol class="steps">
-            ${order.map((st, i) => html`<li class="${i < reached ? 'done' : ''} ${i + 1 === reached && !stopped ? 'current' : ''}"><div>${st === 'Acknowledged' ? 'Confirmed' : st}</div><div class="tiny faint">${at[st] && i < reached ? fmtDate(at[st]) : ''}</div></li>`)}
-            ${stopped ? html`<li class="done stop"><div>${s.status}</div><div class="tiny faint">${fmtDate(s.updated_at)}</div></li>` : ''}
-          </ol>
-          ${s.status_note && s.status === 'Declined' ? html`<div class="alert alert-bad" style="margin-top:18px">${ic('info', 16)}<span>${s.status_note}</span></div>` : ''}
-          ${s.received_samples.length ? html`<p class="small" style="margin-top:18px">Logged as ${s.received_samples.map((x, i) => html`${i ? ', ' : ''}<a class="mono" href="${`#/samples/${x.id}`}">${x.code}</a>`)}</p>` : ''}
+          <div class="row" style="justify-content:space-between;margin-bottom:18px"><h2>${justSent ? 'What happens next' : 'Status'}</h2>${subPill(s.status)}</div>
+          ${submissionTimeline(s)}
+          ${s.received_samples.length ? html`<p class="small">Logged as ${s.received_samples.map((x, i) => html`${i ? ', ' : ''}<a class="mono" href="${`#/samples/${x.id}`}">${x.code}</a>`)}. Follow each sample's tests from its page.</p>` : ''}
+          ${SUBMISSION[s.status].open ? html`<p class="hint">We will message you here when the box arrives.</p>` : ''}
+          ${can.withdraw ? html`<p class="hint">Sent by mistake? <button class="linkish js-withdraw" type="button">Withdraw ${s.code}</button>. Available until the lab confirms.</p>` : ''}
         </section>
         <section class="card">
-          <div class="card-head"><h2>Samples</h2></div>
+          <div class="card-head"><h2>What you told us</h2></div>
           <div class="table-wrap"><table class="table responsive"><thead><tr><th>#</th><th>Description</th><th>Batch / lot</th><th>Your reference</th><th>Quantity</th><th>Container</th></tr></thead>
           <tbody>${s.samples.map((r, i) => html`<tr><td class="muted">${i + 1}</td><td>${r.description}</td><td data-label="Batch">${r.batch_no || '—'}</td><td data-label="Ref.">${r.client_ref || '—'}</td><td data-label="Qty">${r.quantity || '—'}</td><td data-label="Container">${r.container || '—'}</td></tr>`)}</tbody></table></div>
         </section>
         <div class="grid-2">
           <section class="card card-pad"><h2 style="margin-bottom:14px">Tests requested</h2>
-            ${s.methods.length ? html`<ul class="list" style="margin:-6px 0">${s.methods.map((m) => html`<li style="padding:8px 0"><div style="font-weight:560">${m.title}</div><div class="small muted">${m.code} · ${m.technique}</div></li>`)}</ul>` : html`<p class="muted small">None selected — described in the notes.</p>`}
+            ${s.methods.length ? html`<ul class="list" style="margin:-6px 0">${s.methods.map((m) => html`<li style="padding:8px 0"><div style="font-weight:560">${m.title}</div><div class="small muted">${m.code} · ${m.technique}</div></li>`)}</ul>` : html`<p class="muted small">None picked. The lab follows your project plan or your note.</p>`}
           </section>
           <section class="card card-pad"><h2 style="margin-bottom:14px">Handling & shipping</h2>
             <dl class="facts">
@@ -796,10 +828,13 @@ async function submissionDetail(id) {
             ${s.notes ? html`<p class="small pre" style="margin-top:14px;color:var(--ink-2)">${s.notes}</p>` : ''}
           </section>
         </div>
+        ${justSent ? html`<div class="row wrap"><a class="btn" href="#/samples?tab=shipments">Your shipments</a><a class="btn btn-quiet" href="#/submit">Send another</a></div>` : ''}
       </div>`,
     mount(root) {
+      $('.js-copy', root)?.addEventListener('click', async () => { try { await navigator.clipboard.writeText(s.code); } catch { /* clipboard blocked */ } toast(`${s.code} copied`); });
+      $('.js-print', root)?.addEventListener('click', () => window.print());
       $('.js-withdraw', root)?.addEventListener('click', async (e) => {
-        if (!confirm(`Withdraw submission ${s.code}? The laboratory will be notified.`)) return;
+        if (!confirm(`Withdraw ${s.code}? The lab will no longer expect this box.`)) return;
         e.target.disabled = true;
         try { await post(`/submissions/${s.id}/withdraw`); toast('Submission withdrawn'); route(); } catch (err) { if (!err.handled) toast(err.message); e.target.disabled = false; }
       });
@@ -813,7 +848,7 @@ async function submissionDetail(id) {
 
 async function requestsList() {
   const [reqs, subs] = await Promise.all([api('/requests'), api('/submissions')]);
-  const openSubs = subs.filter((s) => ['Submitted', 'Acknowledged'].includes(s.status));
+  const openSubs = subs.filter((s) => SUBMISSION[s.status].open);
   return {
     title: 'Requests',
     html: html`
@@ -825,7 +860,7 @@ async function requestsList() {
             <div class="end">${pill(r.status, REQ_TONE[r.status])}</div></a></li>`)}</ul>` : empty('flask', 'No method requests yet.', html`<a class="btn btn-sm" href="#/requests/new">Start a request</a>`)}
         </section>
         ${openSubs.length ? html`<section class="card"><div class="card-head"><h2>Open sample submissions</h2><a class="small" href="#/samples?tab=shipments">All shipments</a></div>
-          <ul class="list">${openSubs.map((s) => html`<li><a class="item" href="${`#/submissions/${s.id}`}"><div class="grow"><div class="t"><span class="mono">${s.code}</span> · ${plural(s.sample_count, 'sample')}</div><div class="s">${s.courier || 'Courier not given'} · ${fmtDate(s.created_at)}</div></div><div class="end">${pill(SUB_LABEL[s.status], SUB_TONE[s.status])}</div></a></li>`)}</ul></section>` : ''}
+          <ul class="list">${openSubs.map((s) => html`<li><a class="item" href="${`#/submissions/${s.id}`}"><div class="grow"><div class="t"><span class="mono">${s.code}</span> · ${plural(s.sample_count, 'sample')}</div><div class="s">${s.courier || 'Courier not given'} · ${fmtDate(s.created_at)}</div></div><div class="end">${subPill(s.status)}</div></a></li>`)}</ul></section>` : ''}
       </div>`,
   };
 }
@@ -1100,15 +1135,9 @@ async function boot() {
     if (e.status === 401) { showSignIn(); return; }
     throw e;
   }
-  // After a sign-in, the next screen grows in beneath the still-diving helix.
-  const reveal = liftLock(app);
-  if (state.me.user.must_change_password) { showPasswordChange(); reveal(app); return; }
+  if (state.me.user.must_change_password) { showPasswordChange(); return; }
   renderShell();
-  try {
-    await route();
-  } finally {
-    reveal(app);
-  }
+  await route();
 }
 
 window.addEventListener('hashchange', route);

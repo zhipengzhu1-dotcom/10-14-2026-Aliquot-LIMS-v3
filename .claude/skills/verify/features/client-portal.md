@@ -4,15 +4,16 @@ A separate sign-in at `/portal/` where a client's contacts follow their own samp
 
 ## Sub-features
 
-- Sign-in: `input[name=email]`, `input[name=password]`, button `.ak-btn` "Request". There are also demo buttons: `button[data-demo="customer@example.com"]` (Dr. Laura Chen, Acme), `felix.romero@bluestone-bio.example` (Bluestone) and `hannah.schultz@northwind-tx.example` (Northwind).
+- Sign-in (`form#signin`): `input[name=email]`, `input[name=password]`, button "Sign in". Five failures lock the account for 15 minutes; the 423 answer swaps the card for "Too many tries" with the lab's phone and email. A first sign-in shows "Choose your password" (`form#pw`). There are also demo buttons: `button[data-demo="customer@example.com"]` (Dr. Laura Chen, Acme), `felix.romero@bluestone-bio.example` (Bluestone) and `hannah.schultz@northwind-tx.example` (Northwind).
 - Samples: `#/samples?tab=open|reported|all|shipments`, detail at `#/samples/<id>`, CoA at `#/coa/<id>`. A submission's detail is `#/submissions/<id>`.
 - Submit samples (`#/submit`, form `#submission`):
-  - Rows `[data-row]` with `input[name="s.description"]` (required), `s.batch_no`, `s.client_ref`, `s.quantity`, `s.container`. "Add another sample" is `.js-add`.
-  - Tests are `input[name=method_ids]`.
+  - Rows `[data-row]` with `input[name="s.description"]` (required). `s.batch_no`, `s.client_ref`, `s.quantity`, `s.container` sit behind the row's `.js-more` "Add batch, quantity, container". "Add another sample" is `.js-add`; "Paste a list" (`.js-paste`) takes one sample per line into `.js-paste-text`, then `.js-paste-add`.
+  - Tests are chips over `input[name=method_ids]` checkboxes. Priority is `input[name=priority]` radios (Standard, Rush, Urgent) with a hint under them.
   - `select[name=project_id]` lists only the client's open Projects (Quoted, Active, On Hold), from `GET /api/portal/lookups` → `projects`. A closed Project, or another client's, is refused with 400 "Project not found".
-  - Other fields: `select[name=sample_type]`, `select[name=storage]`, `input[name=priority]`, `input[name=courier]`, `input[name=tracking_no]`, `input[name=ship_date]`, `textarea[name=notes]`.
+  - Optional fields are hidden until their "+ chip" is clicked: `button[data-show=project|sample_type|storage|shipping|notes]` reveals `fieldset[data-extra=…]` holding `select[name=project_id]`, `select[name=sample_type]`, `select[name=storage]`, `input[name=courier]`, `input[name=tracking_no]`, `input[name=ship_date]` or `textarea[name=notes]`. Its `.js-hide` "Remove" clears and hides them again.
+  - "Send to lab" opens `#/submissions/<id>?sent=1`: a `.label-card` with the SUB code to write on the box, then the timeline.
 - Requests for method development, validation, transfer or other work: `#/requests`, new at `#/requests/new` (form `#request`, "Send request"). The client's request detail is read-only. The lab moves a request only forward: Submitted → Under review → Proposal sent → Accepted, or Declined while open; Accept only from Proposal sent, and a response that keeps the status is a reply.
-- Withdraw a submission: `.js-withdraw` on `#/submissions/<id>`, shown only when the server sends `can.withdraw` (`GET /api/portal/submissions/<id>` → `can`), which is while the submission is Submitted. Toast "Submission withdrawn"; the status becomes Withdrawn and the button goes. The client sees the staff status Acknowledged as "Expected" (pill) and "Confirmed" (step), so look for those words on screen and `Acknowledged` in the API.
+- Withdraw a submission: the "Sent by mistake? Withdraw SUB-…" link `.js-withdraw` on `#/submissions/<id>`, shown only when the server sends `can.withdraw` (`GET /api/portal/submissions/<id>` → `can`), which is while the submission is Submitted. Toast "Submission withdrawn"; the status becomes Withdrawn and the button goes. Pills read from the `SUBMISSION` table in `public/portal/portal.js`: Submitted is "Sent to lab", Acknowledged is "Expected" (timeline step "Lab is expecting it"). The timeline stops at "Box received"; Declined and Withdrawn end it with their reason.
 - Messages:
   - `#/messages` lists threads.
   - "New" (`.threads-card a[href="#/messages/new"]`; the bare selector matches more than one link) opens form `#newthread` with `input[name=subject]`, `select[name=sample_id]` and `textarea[name=body]`, then "Send".
@@ -37,13 +38,13 @@ agent-browser wait 'header.top nav.nav a[data-nav]'
 agent-browser click '.nav a[data-nav=submit]'
 agent-browser wait '#submission input[name="s.description"]'
 agent-browser fill '#submission input[name="s.description"]' 'Portal verification sample'
-agent-browser click '#submission button[type=submit]'          # "Submit"
-agent-browser wait '.card.success h1'                          # "Submission SUB-YYYY-NNNN received"
+agent-browser click '#submission button[type=submit]'          # "Send to lab"
+agent-browser wait '.label-card .big'                          # the new SUB code
 ```
 
 End state that proves it:
 
-- **Screen:** "Submission SUB-… received", with links "View submission" and "Back to overview".
+- **Screen:** the label card "Your submission number" with the SUB code, "Copy number" and "Print", then "What happens next" with the pill "Sent to lab" and the withdraw line.
 - **API:** as a staff user, `GET /api/portal-admin/submissions` lists the new code with status `Submitted`, and `GET /api/portal-admin/threads` has an automatic thread "Sample submission SUB-…".
 - **Messages:** after sending, the new `.msg.client .bubble` appears in `#msgs`. The staff badge is `[data-badge=portal]` in the sidebar, the same number as `GET /api/nav` → `portal`. It counts Submitted submissions, Submitted method requests, and threads with unread client messages. A new submission without notes adds 1, because its automatic thread holds only a system event; with notes it adds 2, because the notes are posted as a client message. A new client thread adds 1. Withdrawing takes the submission's 1 off again.
 - **Isolation:** a contact from another company (e.g. `felix.romero@bluestone-bio.example`) must not see Acme's records. Under Felix's portal session:
