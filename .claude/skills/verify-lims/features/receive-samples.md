@@ -40,7 +40,7 @@ agent-browser screenshot $E/receive-done.png
 End state that proves it:
 
 - **Screen:** heading "N sample(s) received", and a "Samples logged" card of `a.code[href="/samples/<id>"]` links.
-- **API:** `GET /api/samples/<id>` returns `{sample, tests, custody, can}`: `sample.status` is `Received`, `custody[].action` includes "Received", and each of `tests[]` is `Pending` with `analyst_id` null.
+- **API:** `GET /api/samples/<id>` returns `{sample, tests, assignable, custody, notebook, investigations, signatures, can}`: `sample.status` is `Received`, `custody[].action` includes "Received", and each of `tests[]` is `Pending` with `analyst_id` null.
 - **Audit:** `CREATE` "Sample received" on `samples` for each sample, and `CREATE` "ATM-xxxx vN requested on S-…" on `tests` for each test.
 - **Refusals:**
   - POST `/api/samples/receive` as daniel.okafor returns 403.
