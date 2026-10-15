@@ -98,7 +98,7 @@ function methodPicker(methods, { taken = new Set() } = {}) {
   const flagged = (m) => m.status !== 'Effective' || m.client_name || taken.has(m.id);
   return html`<div class="method-pick${price ? ' priced' : ''}">${methods.map((m) => html`
     <label class="method-opt" title="${`${m.title} · ${m.technique}${m.client_name ? ` · client-specific: ${m.client_name}` : ''}`}" data-mtext="${`${m.code} ${m.title} ${m.technique} ${m.client_name || ''}`.toLowerCase()}">
-      <input type="checkbox" name="method_ids" value="${m.id}" data-price="${m.price}" data-tat="${m.tat_days}" data-code="${m.code}">
+      <input type="checkbox" name="method_ids" value="${m.id}" data-price="${m.price}" data-code="${m.code}">
       <span class="m-main"><span class="m-title">${m.title}</span>${flagged(m) ? html`<span class="m-flags">
         ${m.status !== 'Effective' ? statusBadge(m.status) : ''}${m.client_name ? html`<span class="m-flag">Only for ${m.client_name}</span>` : ''}${taken.has(m.id) ? html`<span class="m-flag">Already on sample</span>` : ''}</span>` : ''}</span>
       <span class="m-code code">${m.code} v${m.version}</span>
@@ -148,8 +148,8 @@ export async function receive(ctx) {
         ${field({ label: 'Client', name: 'client_id', type: 'select', required: true, empty: 'Choose a client…', options: activeClients.map((c) => [c.id, `${c.name} (${c.code})`]), value: ctx.query.client })}
         <label class="field" title="Links the samples to the PO for billing"><span class="label">Project</span><select name="project_id" data-project></select></label>
         ${field({ label: 'Sample type', name: 'sample_type', type: 'select', options: L.sampleTypes, empty: '—' })}
-        <div class="field"><span class="label">Priority <small class="muted" data-prio-hint></small></span>
-          <div class="segmented" data-priority>${L.priorities.map((p, i) => html`<a href="#" data-p="${p}" class="${i === 0 ? 'active' : ''}">${p === 'Standard' ? '' : icon('zap', { size: 12 })}${p}</a>`)}</div>
+        <div class="field"><span class="label">Turnaround <small class="muted" data-prio-hint></small></span>
+          <div class="segmented" data-priority>${L.priorities.map((p) => html`<a href="#" data-p="${p}" class="${p === L.defaultPriority ? 'active' : ''}">${L.priorityTiers[p].tone ? icon('zap', { size: 12 }) : ''}${p}</a>`)}</div>
         </div>
         ${field({ label: 'Received at', name: 'received_at', type: 'datetime-local', value: localDateTimeValue(), required: true })}
         ${field({ label: 'Condition on receipt', name: 'condition', type: 'select', options: L.receiptConditions })}
@@ -191,7 +191,7 @@ export async function receive(ctx) {
   const clientSel = form.querySelector('[name=client_id]');
   const projectSel = form.querySelector('[data-project]');
   const dueInput = form.querySelector('[data-due]');
-  let priority = 'Standard';
+  let priority = L.defaultPriority;
 
   const syncRowsFromDom = () => {
     rows = [...tbody.querySelectorAll('tr')].map((tr) => Object.fromEntries([...tr.querySelectorAll('input')].map((i) => [i.dataset.k, i.value])));
@@ -219,16 +219,15 @@ export async function receive(ctx) {
     form.querySelector('[data-s=tests]').textContent = n * ms.length;
     form.querySelector('[data-s=methods]').textContent = ms.length;
     form.querySelector('[data-s=codes]').textContent = ms.map((m) => m.dataset.code).join(' · ');
-    const pct = priority === 'Rush' ? state.settings.rush_surcharge_pct : priority === 'Urgent' ? state.settings.urgent_surcharge_pct : 0;
+    const tier = L.priorityTiers[priority];
+    const pct = tier.surcharge ? state.settings[tier.surcharge] : 0;
     const v = form.querySelector('[data-s=value]');
     if (v) v.textContent = n && ms.length ? money(n * ms.reduce((s, m) => s + Number(m.dataset.price), 0) * (1 + pct / 100)) : '—';
     if (!dueOverridden) {
-      const tat = ms.length ? Math.max(...ms.map((m) => Number(m.dataset.tat))) : 10;
-      const days = priority === 'Urgent' ? Math.min(2, tat) : priority === 'Rush' ? Math.ceil(tat / 2) : tat;
       const received = (form.querySelector('[name=received_at]').value || todayIso()).slice(0, 10);
-      dueInput.value = addBusinessDays(received, days);
+      dueInput.value = addBusinessDays(received, tier.days);
     }
-    form.querySelector('[data-prio-hint]').textContent = priority === 'Standard' ? '' : `· faster, +${pct}%`;
+    form.querySelector('[data-prio-hint]').textContent = pct ? `· +${pct}%` : '';
   };
 
   const drawProjects = () => {
@@ -473,7 +472,7 @@ export async function detail(ctx) {
         ${field({ label: 'Batch / lot', name: 'batch_no', value: s.batch_no })}
         ${field({ label: 'Client reference', name: 'client_ref', value: s.client_ref })}
         ${field({ label: 'Sample type', name: 'sample_type', type: 'select', options: L.sampleTypes, value: s.sample_type, empty: '—' })}
-        ${field({ label: 'Priority', name: 'priority', type: 'select', options: L.priorities, value: s.priority })}
+        ${field({ label: 'Turnaround', name: 'priority', type: 'select', options: [...new Set([...L.priorities, s.priority])], value: s.priority })}
         ${field({ label: 'Quantity', name: 'quantity', value: s.quantity })}
         ${field({ label: 'Container', name: 'container', value: s.container })}
         ${field({ label: 'Storage', name: 'storage', type: 'select', options: L.storageConditions, value: s.storage, empty: '—' })}

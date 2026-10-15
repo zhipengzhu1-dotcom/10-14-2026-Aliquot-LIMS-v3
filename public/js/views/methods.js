@@ -196,7 +196,7 @@ export async function edit(ctx) {
         ${field({ label: 'Reference / compendial basis', name: 'reference', value: m.reference, placeholder: 'e.g. USP <467>, Ph. Eur. 2.2.29, client method' })}
         ${field({ label: 'Client', name: 'client_id', type: 'select', options: clients.map((c) => [c.id, c.name]), value: m.client_id, empty: 'General — any client', hint: 'Set for client-specific or transferred methods' })}
         ${field({ label: 'Method owner', name: 'owner_id', type: 'select', options: activeUsers(['scientist', 'manager', 'analyst', 'qa']).map((u) => [u.id, u.full_name]), value: m.owner_id })}
-        ${field({ label: 'Price per test', name: 'price', type: 'number', value: m.price, min: 0, step: '0.01', hint: `In ${state.settings.currency}. Rush/urgent surcharges are added automatically.` })}
+        ${field({ label: 'Price per test', name: 'price', type: 'number', value: m.price, min: 0, step: '0.01', hint: `In ${state.settings.currency}. Faster turnaround surcharges are added automatically.` })}
         ${field({ label: 'Turnaround (working days)', name: 'tat_days', type: 'number', value: m.tat_days, min: 1, step: 1 })}
         ${field({ label: 'Scope', name: 'scope', type: 'textarea', rows: 2, value: m.scope, span: 2, placeholder: 'What the method is for and its applicable range' })}
         ${field({ label: 'Procedure summary', name: 'procedure', type: 'textarea', rows: 8, value: m.procedure, span: 2, hint: 'Markdown supported. Key conditions and system suitability — the full SOP can be attached as a file.' })}

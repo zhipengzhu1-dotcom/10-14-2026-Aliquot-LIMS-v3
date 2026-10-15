@@ -5,7 +5,7 @@ import { icon } from '../core/icons.js';
 import { navigate, setQuery, refreshNav } from '../core/nav.js';
 import { markdown } from '../core/markdown.js';
 import {
-  pageHead, card, kv, mountTable, searchBox, segmented, statusBadge, priorityBadge, dueChip, fmtDate, fmtDateTime, money, plural,
+  pageHead, card, kv, mountTable, searchBox, segmented, statusBadge, priorityBadge, priorityTone, dueChip, fmtDate, fmtDateTime, money, plural,
   emptyState, field, openForm, esign, toast, showError, busy, promptReason, specText, resultText, outcomeBadge, person, badge, debounce, todayIso,
 } from '../core/ui.js';
 import { stepper, signatureList, recordFooter, wireRecordFooter } from '../core/components.js';
@@ -86,7 +86,7 @@ export async function worklist(ctx) {
     rows,
     selectable: canAssign,
     rowHref: (r) => `/tests/${r.id}`,
-    rowClass: (r) => (r.oos ? 'row-fail' : r.priority !== 'Standard' ? 'row-warn' : ''),
+    rowClass: (r) => (r.oos ? 'row-fail' : priorityTone(r.priority) ? 'row-warn' : ''),
     onSelectionChange: (ids) => {
       const b = ctx.el.querySelector('[data-act=assign]');
       if (b) {

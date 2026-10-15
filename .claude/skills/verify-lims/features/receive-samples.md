@@ -7,7 +7,7 @@ Log a delivery from a client: one form for the delivery, a row per sample (or pa
 - Delivery fields:
   - `select[name=client_id]` (required), then `select[name=project_id][data-project]`, which fills in after a client is chosen. It lists only that client's open Projects (Quoted, Active, On Hold), picks the one automatically when there is exactly one, and reads "No open projects for this client" when there are none.
   - `select[name=sample_type]`, `select[name=condition]`, `select[name=storage]`, `input[name=location]`, `input[name=received_at]`, `textarea[name=notes]`.
-  - Priority `a[data-p="Standard|Rush|Urgent"]`.
+  - Turnaround `a[data-p="Same day|Next day|3 days|One week"]`, One week active. Due date is receipt + 0, 1, 3 or 5 working days; the surcharge (Settings, default 200, 100, 50, 0 %) shows beside the label. The Receive dialog on a portal submission has a `select[name=priority]` defaulting to the tier the client asked for.
 - Sample rows `tbody[data-rows] tr`:
   - Inputs `input[data-k=description|batch_no|client_ref|quantity|container]`, aria-labels like "Description row 1" and "Batch row 1". Description is required for every non-empty row.
   - `[data-act=add]` "Add row", `[data-act=add5]`, `[data-act=fill]`, delete with `[data-del=<i>]`.

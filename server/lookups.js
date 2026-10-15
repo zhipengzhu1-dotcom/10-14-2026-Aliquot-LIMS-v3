@@ -79,7 +79,24 @@ export const INVENTORY_STATUSES = ['Active', 'Quarantine', 'Consumed', 'Disposed
 
 export const SAMPLE_TYPES = ['Drug Substance (API)', 'Drug Product', 'Excipient', 'Raw Material', 'In-Process', 'Stability', 'Reference Material', 'Cleaning Swab / Rinse', 'Other'];
 export const STORAGE_CONDITIONS = ['Ambient (15–25 °C)', 'Refrigerated (2–8 °C)', 'Frozen (−20 °C)', 'Deep frozen (−80 °C)', 'Ambient, protect from light'];
-export const PRIORITIES = ['Standard', 'Rush', 'Urgent'];
+// Turnaround tiers. `days` are working days from receipt; a retired tier derives its days from the slowest method's
+// turnaround (`tatDays`) and stays only so records that carry it keep their due dates and prices. `surcharge` names
+// the lab setting holding its percentage; `rank` orders work queues, most urgent first; `tone` badges the tier, none
+// for the baseline.
+export const PRIORITY_TIERS = {
+  'Same day': { days: 0, surcharge: 'same_day_surcharge_pct', rank: 0, tone: 'red' },
+  'Next day': { days: 1, surcharge: 'next_day_surcharge_pct', rank: 1, tone: 'amber' },
+  '3 days': { days: 3, surcharge: 'three_day_surcharge_pct', rank: 2, tone: 'amber' },
+  'One week': { days: 5, surcharge: null, rank: 3, tone: null },
+  Urgent: { tatDays: (tat) => Math.min(2, tat), surcharge: 'urgent_surcharge_pct', rank: 1, tone: 'red', retired: true },
+  Rush: { tatDays: (tat) => Math.ceil(tat / 2), surcharge: 'rush_surcharge_pct', rank: 2, tone: 'amber', retired: true },
+  Standard: { tatDays: (tat) => tat, surcharge: null, rank: 3, tone: null, retired: true },
+};
+/** The tiers new input may carry. */
+export const PRIORITIES = Object.keys(PRIORITY_TIERS).filter((k) => !PRIORITY_TIERS[k].retired);
+export const DEFAULT_PRIORITY = 'One week';
+/** SQL ranking `column` by tier urgency, for ORDER BY. */
+export const priorityRank = (column) => `CASE ${column} ${Object.entries(PRIORITY_TIERS).map(([k, t]) => `WHEN '${k}' THEN ${t.rank}`).join(' ')} ELSE 9 END`;
 export const RECEIPT_CONDITIONS = ['Acceptable', 'Damaged container', 'Temperature excursion', 'Insufficient quantity', 'Labelling discrepancy'];
 export const SAMPLE_STATUSES = ['Received', 'In Testing', 'In Review', 'Approved', 'Reported', 'Cancelled', 'Disposed'];
 export const SAMPLE_OPEN = ['Received', 'In Testing', 'In Review', 'Approved'];
@@ -148,6 +165,8 @@ export function lookups() {
     sampleTypes: SAMPLE_TYPES,
     storageConditions: STORAGE_CONDITIONS,
     priorities: PRIORITIES,
+    defaultPriority: DEFAULT_PRIORITY,
+    priorityTiers: PRIORITY_TIERS,
     receiptConditions: RECEIPT_CONDITIONS,
     sampleStatuses: SAMPLE_STATUSES,
     custodyActions: CUSTODY_ACTIONS,

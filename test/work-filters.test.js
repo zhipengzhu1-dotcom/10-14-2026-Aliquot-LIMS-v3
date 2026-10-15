@@ -74,7 +74,7 @@ async function setupLab() {
 async function receive(client = lab.acme) {
   const priya = await as('priya.raman');
   const { samples } = await priya.ok('POST', '/api/samples/receive', {
-    client_id: client.id, sample_type: 'Drug Product', storage: 'Ambient (15–25 °C)', priority: 'Standard',
+    client_id: client.id, sample_type: 'Drug Product', storage: 'Ambient (15–25 °C)', priority: 'One week',
     samples: [{ description: 'Work filter sample' }], method_ids: [lab.hplc.id],
   });
   const detail = await priya.ok('GET', `/api/samples/${samples[0].id}`);

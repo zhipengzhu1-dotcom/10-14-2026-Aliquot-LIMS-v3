@@ -6,7 +6,7 @@ import {
   can, checkPasswordPolicy, destroySession, destroyOtherSessions, hashPassword, login, permissionsFor, publicUser, registerFailure, verifyPassword,
 } from '../auth.js';
 import { getSettings, setSettings, DEFAULTS } from '../settings.js';
-import { ROLES, lookups, RECORD_ACCESS, MONEY_FIELDS, rolesWith } from '../lookups.js';
+import { ROLES, lookups, RECORD_ACCESS, MONEY_FIELDS, PRIORITY_TIERS, rolesWith } from '../lookups.js';
 import { clean, initialsOf, likeTerm, limitParam, nowIso, today, addDays } from '../util.js';
 import { seedDemo } from '../seed.js';
 import { CLOUDFLARE_TUNNEL } from '../config.js';
@@ -15,6 +15,7 @@ import { SAMPLE_QUEUES, SAMPLE_RULES, TEST_QUEUES, TEST_RULES, TEST_OPEN } from 
 import { INVESTIGATION_OPEN } from '../investigations.js';
 import { ENTRY_QUEUES, ENTRY_RULES } from '../notebook.js';
 
+const SURCHARGE_SETTINGS = Object.values(PRIORITY_TIERS).map((t) => t.surcharge).filter(Boolean);
 const USER_FIELDS = 'id, username, full_name, initials, email, title, role, active, last_login_at, created_at, must_change_password';
 
 function publicSettings() {
@@ -22,8 +23,7 @@ function publicSettings() {
   return {
     lab_name: s.lab_name, currency: s.currency, demo_mode: s.demo_mode === '1',
     session_idle_minutes: Number(s.session_idle_minutes) || 60,
-    rush_surcharge_pct: Number(s.rush_surcharge_pct) || 0,
-    urgent_surcharge_pct: Number(s.urgent_surcharge_pct) || 0,
+    ...Object.fromEntries(SURCHARGE_SETTINGS.map((k) => [k, Number(s[k]) || 0])),
   };
 }
 
@@ -225,7 +225,7 @@ export default function routes(r) {
   r.put('/api/settings', (ctx) => {
     const patch = {};
     for (const k of Object.keys(DEFAULTS)) if (k in ctx.body) patch[k] = ctx.body[k];
-    for (const k of ['tax_rate', 'rush_surcharge_pct', 'urgent_surcharge_pct', 'payment_terms_days', 'session_idle_minutes']) {
+    for (const k of ['tax_rate', ...SURCHARGE_SETTINGS, 'payment_terms_days', 'session_idle_minutes']) {
       if (k in patch && !Number.isFinite(Number(patch[k]))) throw bad(`${k.replace(/_/g, ' ')} must be a number`);
     }
     if ('session_idle_minutes' in patch && (Number(patch.session_idle_minutes) < 5 || Number(patch.session_idle_minutes) > 720)) {

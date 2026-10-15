@@ -4,7 +4,7 @@ import { api } from '../core/api.js';
 import { state } from '../core/state.js';
 import { icon } from '../core/icons.js';
 import { barcodeSvg } from '../core/barcode.js';
-import { fmtDate, fmtDateTime, specText, resultText, money } from '../core/ui.js';
+import { fmtDate, fmtDateTime, specText, resultText, money, priorityTone } from '../core/ui.js';
 
 function toolbar(back, label, extra = '') {
   return html`<div class="print-toolbar">
@@ -78,7 +78,7 @@ export async function labels(ctx) {
         <div class="l-row"><span class="l-code">${s.code}</span><span>${s.client_code}</span></div>
         <div class="l-desc">${s.description}</div>
         ${raw(barcodeSvg(s.code, { height: 34, module: 1 }))}
-        <div class="l-row"><span>${s.batch_no ? `Batch ${s.batch_no}` : ''}</span><span class="${s.priority !== 'Standard' ? 'l-prio' : ''}">${s.priority !== 'Standard' ? s.priority.toUpperCase() : ''}</span></div>
+        <div class="l-row"><span>${s.batch_no ? `Batch ${s.batch_no}` : ''}</span><span class="${priorityTone(s.priority) ? 'l-prio' : ''}">${priorityTone(s.priority) ? s.priority.toUpperCase() : ''}</span></div>
         <div class="l-row"><span>Rec. ${fmtDate(s.received_at)}</span><span>${(s.storage || '').replace(/\s*\(.*\)/, '')}</span></div>
       </div>`)}</div></div>`);
   ctx.el.querySelector('[data-print]').addEventListener('click', () => window.print());

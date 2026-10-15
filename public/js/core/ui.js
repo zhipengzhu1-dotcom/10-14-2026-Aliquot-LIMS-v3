@@ -108,7 +108,7 @@ const TONES = {
   // outcomes
   Pass: 'green', Fail: 'red', Report: 'gray',
   // misc
-  Minor: 'gray', Major: 'amber', Critical: 'red', Rush: 'amber', Urgent: 'red', Standard: 'gray',
+  Minor: 'gray', Major: 'amber', Critical: 'red',
 };
 
 export const tone = (status) => TONES[status] || 'gray';
@@ -125,9 +125,13 @@ export function outcomeBadge(outcome) {
   return html`<span class="outcome pending">Pending</span>`;
 }
 
+/** A turnaround tier's badge tone, or null for the baseline tier that needs no badge. */
+export const priorityTone = (p) => state.lookups?.priorityTiers?.[p]?.tone ?? null;
+
 export function priorityBadge(p) {
-  if (!p || p === 'Standard') return '';
-  return html`<span class="badge ${tone(p)} prio">${icon('zap', { size: 11 })}${p}</span>`;
+  const t = priorityTone(p);
+  if (!t) return '';
+  return html`<span class="badge ${t} prio">${icon('zap', { size: 11 })}${p}</span>`;
 }
 
 export function dueChip(date, { done = false } = {}) {

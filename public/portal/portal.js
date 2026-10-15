@@ -174,7 +174,7 @@ const SUBMISSION_STEPS = [
   { status: 'Acknowledged', title: 'Lab is expecting it', sub: 'We confirm the shipment and watch for it', at: 'acknowledged_at' },
   { status: 'Received', title: 'Box received', sub: 'Samples are logged and checked in', at: 'received_at' },
 ];
-const PRIORITY_HINT = { Standard: 'Normal turnaround', Rush: 'Faster, may cost more', Urgent: 'We call you first' };
+const PRIORITY_HINT = { 'Same day': 'Results the day your samples arrive. Costs the most', 'Next day': 'Results the working day after arrival. Costs more', '3 days': 'Results within three working days. Costs a little more', 'One week': 'Our normal turnaround: five working days' };
 const REQ_TONE = { Submitted: 'info', 'Under review': 'accent', 'Proposal sent': 'warn', Accepted: 'ok', Declined: 'bad' };
 
 const pill = (label, tone = '') => html`<span class="pill ${tone}">${label}</span>`;
@@ -506,12 +506,12 @@ async function overview() {
 
 async function samplesList(tab) {
   const isShip = tab === 'shipments';
-  const rows = isShip ? await api('/submissions') : await api(`/samples?status=${encodeURIComponent(tab)}`);
+  const [rows, lk] = await Promise.all([isShip ? api('/submissions') : api(`/samples?status=${encodeURIComponent(tab)}`), lookups()]);
   const tabs = [['open', 'In the lab'], ['reported', 'Reported'], ['all', 'All samples'], ['shipments', 'Shipments']];
   const table = isShip
     ? (rows.length ? html`<div class="table-wrap"><table class="table responsive"><thead><tr><th>Submission</th><th>Samples</th><th>Courier</th><th>Submitted</th><th>Status</th></tr></thead><tbody>
         ${rows.map((s) => html`<tr data-href="${`#/submissions/${s.id}`}" style="cursor:pointer">
-          <td><a class="mono" href="${`#/submissions/${s.id}`}">${s.code}</a>${s.priority !== 'Standard' ? html` <span class="pill warn plain" style="margin-left:6px">${s.priority}</span>` : ''}</td>
+          <td><a class="mono" href="${`#/submissions/${s.id}`}">${s.code}</a>${lk.priorityTones[s.priority] ? html` <span class="pill warn plain" style="margin-left:6px">${s.priority}</span>` : ''}</td>
           <td data-label="Samples">${plural(s.sample_count, 'sample')}${s.method_count ? ` · ${plural(s.method_count, 'test')}` : ''}</td>
           <td data-label="Courier">${s.courier || '—'}${s.tracking_no ? html`<div class="tiny muted mono">${s.tracking_no}</div>` : ''}</td>
           <td data-label="Submitted">${fmtDate(s.created_at)}</td>
@@ -537,7 +537,7 @@ async function samplesList(tab) {
 }
 
 async function sampleDetail(id) {
-  const { sample: s, tests, submission } = await api(`/samples/${id}`);
+  const [{ sample: s, tests, submission }, lk] = await Promise.all([api(`/samples/${id}`), lookups()]);
   const stage = SAMPLE_STAGE[s.status] || 0;
   const steps = [['Received', fmtDate(s.received_at)], ['Testing', ''], ['Review', ''], ['Reported', s.reported_at ? fmtDate(s.reported_at) : '']];
   return {
@@ -556,7 +556,7 @@ async function sampleDetail(id) {
           <section class="card card-pad">
             <div class="row" style="justify-content:space-between;margin-bottom:18px"><h2>Progress</h2>${samplePill(s.status)}</div>
             <ol class="steps">${steps.map(([l, d], i) => html`<li class="${i + 1 <= stage ? 'done' : ''} ${i + 1 === stage ? 'current' : ''}"><div>${l}</div><div class="tiny faint">${d}</div></li>`)}</ol>
-            ${s.status !== 'Reported' && s.due_date ? html`<p class="small muted" style="margin-top:18px">Expected completion <b style="color:var(--ink)">${fmtDate(s.due_date)}</b>${s.priority !== 'Standard' ? html` · ${s.priority} priority` : ''}</p>` : ''}
+            ${s.status !== 'Reported' && s.due_date ? html`<p class="small muted" style="margin-top:18px">Expected completion <b style="color:var(--ink)">${fmtDate(s.due_date)}</b>${lk.priorityTones[s.priority] ? html` · ${s.priority} turnaround` : ''}</p>` : ''}
           </section>
           <section class="card">
             <div class="card-head"><h2>Tests</h2><span class="small muted">${s.tests_done} of ${s.test_count} complete</span></div>
@@ -681,8 +681,8 @@ async function submitForm() {
         </section>
         <section class="slip-sec">
           <h2><span class="step-n">03</span>How fast</h2>
-          <div class="seg" role="radiogroup" aria-label="Priority">${lk.priorities.map((p) => html`<label><input type="radio" name="priority" value="${p}" ${p === 'Standard' ? raw('checked') : ''}><span>${p}</span></label>`)}</div>
-          <p class="slip-sub js-priority-hint" style="margin:8px 0 0">${PRIORITY_HINT.Standard}</p>
+          <div class="seg" role="radiogroup" aria-label="Turnaround">${lk.priorities.map((p) => html`<label><input type="radio" name="priority" value="${p}" ${p === lk.defaultPriority ? raw('checked') : ''}><span>${p}</span></label>`)}</div>
+          <p class="slip-sub js-priority-hint" style="margin:8px 0 0">${PRIORITY_HINT[lk.defaultPriority]}</p>
         </section>
         <section class="slip-sec">
           <h2><span class="step-n">04</span>Anything else? <span class="opt">optional</span></h2>
@@ -836,7 +836,7 @@ async function submissionDetail(id, query) {
           <section class="card card-pad"><h2 style="margin-bottom:14px">Handling & shipping</h2>
             <dl class="facts">
               ${s.project ? html`<dt>Project</dt><dd class="js-project"><span class="mono">${s.project.code}</span> ${s.project.title}</dd>` : ''}
-              <dt>Priority</dt><dd>${s.priority}</dd>
+              <dt>Turnaround</dt><dd>${s.priority}</dd>
               <dt>Sample type</dt><dd>${s.sample_type || '—'}</dd>
               <dt>Storage</dt><dd>${s.storage || '—'}</dd>
               <dt>Courier</dt><dd>${s.courier || '—'}</dd>

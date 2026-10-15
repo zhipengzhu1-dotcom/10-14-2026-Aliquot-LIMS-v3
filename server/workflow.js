@@ -10,7 +10,7 @@ import { all, get, run, ph, tx } from './db.js';
 import { update, mustGet } from './repo.js';
 import { bad, forbidden, guard } from './http.js';
 import { can, verifySignature, applySignature } from './auth.js';
-import { SAMPLE_OPEN, SIGNATURE_MEANINGS } from './lookups.js';
+import { SAMPLE_OPEN, SIGNATURE_MEANINGS, priorityRank } from './lookups.js';
 import { clean, nowIso, today, idList, round, sameValue, fixed, specText } from './util.js';
 import { openSampleInvestigation, openTestInvestigation, raiseInvestigation } from './investigations.js';
 
@@ -464,7 +464,7 @@ export const TEST_QUEUES = {
   assigned: {
     rule: 'edit',
     stage: () => all(`${TEST_SELECT} WHERE t.analyst_id IS NOT NULL AND t.status IN (${ph(TEST_EDITABLE)})
-      ORDER BY CASE s.priority WHEN 'Urgent' THEN 0 WHEN 'Rush' THEN 1 ELSE 2 END, t.due_date, t.id`, ...TEST_EDITABLE),
+      ORDER BY ${priorityRank('s.priority')}, t.due_date, t.id`, ...TEST_EDITABLE),
   },
   review: { rule: 'review', stage: () => all(`${TEST_SELECT} WHERE t.status = 'Submitted' ORDER BY t.submitted_at, t.id`) },
   // An approver may still return a Test held by an open Investigation, so it stays in their Queue.

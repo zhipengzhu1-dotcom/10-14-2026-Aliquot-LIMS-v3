@@ -73,7 +73,7 @@ const newProject = (fields = {}) => lab.priya.ok('POST', '/api/projects', { clie
 
 async function receive(projectId, dueDate) {
   const { samples } = await lab.priya.ok('POST', '/api/samples/receive', {
-    client_id: lab.acme.id, project_id: projectId, due_date: dueDate, sample_type: 'Drug Product', storage: 'Ambient (15–25 °C)', priority: 'Standard',
+    client_id: lab.acme.id, project_id: projectId, due_date: dueDate, sample_type: 'Drug Product', storage: 'Ambient (15–25 °C)', priority: 'One week',
     samples: [{ description: 'Workload sample' }], method_ids: [lab.hplc.id],
   });
   return (await lab.priya.ok('GET', `/api/samples/${samples[0].id}`)).tests[0].id;

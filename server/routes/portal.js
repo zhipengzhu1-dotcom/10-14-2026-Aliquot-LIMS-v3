@@ -13,7 +13,7 @@ import { HttpError, bad, forbidden, notFound, guard, flags } from '../http.js';
 import { assertCan, can, checkPasswordPolicy, hashPassword, verifyPassword } from '../auth.js';
 import { portalAuth, portalLogin, portalLogout, portalCtx, publicPortalUser, portalDestroyOtherSessions } from '../portal-auth.js';
 import { getSettings } from '../settings.js';
-import { SAMPLE_TYPES, STORAGE_CONDITIONS, PRIORITIES, TECHNIQUES, SAMPLE_OPEN, PROJECT_OPEN } from '../lookups.js';
+import { SAMPLE_TYPES, STORAGE_CONDITIONS, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, TECHNIQUES, SAMPLE_OPEN, PROJECT_OPEN } from '../lookups.js';
 import { clean, nowIso, idList, addDays, today, specText, fixed } from '../util.js';
 import { receiveSamples } from './lab.js';
 import { createProject } from './business.js';
@@ -91,7 +91,7 @@ const threadMessages = (id, { forClient }) => all(`
 const submissionSchema = {
   project_id: { type: 'id', ref: 'projects', label: 'project' },
   sample_type: { type: 'enum', values: SAMPLE_TYPES },
-  priority: { type: 'enum', values: PRIORITIES, default: 'Standard' },
+  priority: { type: 'enum', values: PRIORITIES, default: DEFAULT_PRIORITY },
   storage: { type: 'enum', values: STORAGE_CONDITIONS },
   courier: { max: 120 },
   tracking_no: { max: 120, label: 'tracking number' },
@@ -379,7 +379,8 @@ export default function routes(r) {
   r.get('/api/portal/lookups', (ctx) => {
     const pu = portalAuth(ctx);
     return {
-      sampleTypes: SAMPLE_TYPES, storageConditions: STORAGE_CONDITIONS, priorities: PRIORITIES, techniques: TECHNIQUES,
+      sampleTypes: SAMPLE_TYPES, storageConditions: STORAGE_CONDITIONS, priorities: PRIORITIES, defaultPriority: DEFAULT_PRIORITY, techniques: TECHNIQUES,
+      priorityTones: Object.fromEntries(Object.entries(PRIORITY_TIERS).map(([k, t]) => [k, t.tone])),
       requestTypes: REQUEST_TYPES, validationParameters: VALIDATION_PARAMETERS, regulatoryContexts: REGULATORY_CONTEXTS,
       methods: clientMethods(pu.client_id),
       projects: openProjects(pu.client_id),

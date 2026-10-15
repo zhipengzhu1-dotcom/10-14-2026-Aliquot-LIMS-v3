@@ -119,7 +119,7 @@ test('full workflow: receive → assign → results → review → approval → 
 
   // 1. Receive two samples with two tests each.
   const received = await nadia.ok('POST', '/api/samples/receive', {
-    client_id: acme.id, project_id: project.id, sample_type: 'Drug Product', storage: 'Ambient (15–25 °C)', priority: 'Rush',
+    client_id: acme.id, project_id: project.id, sample_type: 'Drug Product', storage: 'Ambient (15–25 °C)', priority: '3 days',
     samples: [{ description: 'Test tablets A', batch_no: 'TB-001' }, { description: 'Test tablets B', batch_no: 'TB-002' }],
     method_ids: [kf.id, ftir.id],
   });
@@ -129,7 +129,7 @@ test('full workflow: receive → assign → results → review → approval → 
   assert.equal(sample.sample.status, 'Received');
   const kfTest = sample.tests.find((t) => t.method_code === 'ATM-0002');
   const irTest = sample.tests.find((t) => t.method_code === 'ATM-0006');
-  assert.equal(kfTest.price, kf.price * 1.5, 'rush surcharge applied');
+  assert.equal(kfTest.price, kf.price * 1.5, '3 days surcharge applied');
 
   // 2. Assignment respects training records.
   const ben = (await priya.ok('GET', '/api/users')).find((u) => u.username === 'ben.carter');
