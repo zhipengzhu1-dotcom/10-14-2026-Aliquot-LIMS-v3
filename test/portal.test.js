@@ -260,6 +260,16 @@ test('a submission names only one of the client’s own open projects, the ones 
   }
 });
 
+test('a client reads the project on their own submission; others cannot read it', async () => {
+  const project = (await manager.ok('POST', '/api/projects', { client_id: ids.acme, title: 'Detail project', type: 'Other', status: 'Active' }));
+  const laura = await portal(LAURA);
+  const withProject = await laura.ok('POST', '/api/portal/submissions', { project_id: project.id, samples: [{ description: 'With a project' }] });
+  const without = await laura.ok('POST', '/api/portal/submissions', { samples: [{ description: 'No project' }] });
+  assert.deepEqual((await laura.ok('GET', `/api/portal/submissions/${withProject.id}`)).submission.project, { id: project.id, code: project.code, title: 'Detail project' });
+  assert.equal((await laura.ok('GET', `/api/portal/submissions/${without.id}`)).submission.project, null);
+  assert.equal((await (await portal(FELIX)).get(`/api/portal/submissions/${withProject.id}`)).status, 404);
+});
+
 test('messages: unread tracking on both sides; replies are plain text', async () => {
   const laura = await portal(LAURA);
   const { id } = await laura.ok('POST', '/api/portal/threads', { subject: 'Question about MF-2614', body: 'Hi,\n<b>bold?</b>' });
