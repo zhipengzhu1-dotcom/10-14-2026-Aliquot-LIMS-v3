@@ -49,14 +49,20 @@ async function loadPage(page) {
   return seen;
 }
 
-for (const page of ['/', '/portal/']) {
-  test(`${page} loads the helix and its vendored three.js from this server`, async () => {
-    const loaded = await loadPage(page);
-    for (const url of ['/js/core/helix.js', '/vendor/three/three.module.min.js', '/vendor/three/three.core.js']) {
-      assert.ok(loaded.has(url), `${page} never reaches ${url}`);
-    }
-  });
+test('/ loads the helix and its vendored three.js from this server', async () => {
+  const loaded = await loadPage('/');
+  for (const url of ['/js/core/helix.js', '/vendor/three/three.module.min.js', '/vendor/three/three.core.js']) {
+    assert.ok(loaded.has(url), `/ never reaches ${url}`);
+  }
+});
 
+test('/portal/ signs clients in without the lock screen or three.js', async () => {
+  const loaded = await loadPage('/portal/');
+  const heavy = ['/js/core/lock.js', '/js/core/helix.js', '/vendor/three/three.module.min.js', '/assets/lock.css'].filter((url) => loaded.has(url));
+  assert.deepEqual(heavy, []);
+});
+
+for (const page of ['/', '/portal/']) {
   test(`${page} no longer loads or styles the ribbon sculpture`, async () => {
     const loaded = await loadPage(page);
     const stale = [...loaded].filter(([url, body]) => /ribbon/i.test(url) || /ribbon/i.test(body)).map(([url]) => url);
