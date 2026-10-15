@@ -22,7 +22,7 @@ The image is GitHub's stock `ghcr.io/actions/actions-runner`, pinned by digest f
 You need:
 
 - Docker Desktop running.
-- The GitHub CLI signed in as an admin of `zhipengzhu1-dotcom/10-04-2026-Animated-LIMS`. Check with `gh auth status`.
+- The GitHub CLI signed in as an admin of `zhipengzhu1-dotcom/10-14-2026-Aliquot-LIMS-v3`. Check with `gh auth status`.
 
 The registration comes from `gh api` at each pass of the loop and passes to the container as an argument. The script writes it to no file, and the runner masks it in the slot log. While its container runs, `ps` on the Mac and `docker inspect` show it, Docker keeps it in the container's configuration inside its VM disk, and the job can read it. That exposure is accepted because the registration admits one runner for one job, and the container's removal deletes it.
 
