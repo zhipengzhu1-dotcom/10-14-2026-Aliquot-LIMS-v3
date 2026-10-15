@@ -9,7 +9,7 @@ One file per user-facing feature. Each says how a user reaches it, how to drive 
 | Peer review and QA approval, issue CoA | [review-approve.md](review-approve.md) | sarah.lindqvist, then daniel.okafor | yes, 2026-10-14 |
 | Lab notebook: write, sign, witness | [notebook.md](notebook.md) | tom.fletcher, then sarah.lindqvist | yes, 2026-10-14 |
 | Client portal | [client-portal.md](client-portal.md) | customer@example.com | yes, 2026-10-14 |
-| OOS investigations: auto-raise, record, QA close | [oos-investigation.md](oos-investigation.md) | daniel.okafor (tom.fletcher to raise) | yes, 2026-10-14: QA close path, API, audit rows, chain verify and refusals. Auto-raise on a failing submit not re-proven under this skill |
+| OOS investigations: auto-raise, record, QA close | [oos-investigation.md](oos-investigation.md) | daniel.okafor (tom.fletcher to raise) | yes, 2026-10-14: QA close path, API, audit rows, chain verify and refusals. Auto-raise on a failing submit proven live 2026-10-14 |
 | Invoices: ready to bill, issue, pay, void | [invoices.md](invoices.md) | grace.holloway | yes, 2026-10-14 |
 | Audit trail: search, verify integrity, export | [audit-trail.md](audit-trail.md) | daniel.okafor | yes, 2026-10-14 |
 

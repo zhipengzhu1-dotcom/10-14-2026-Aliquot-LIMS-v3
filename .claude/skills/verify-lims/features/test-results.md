@@ -60,5 +60,6 @@ End state that proves it:
 - The Conforms / Does not radios are visually hidden inside `label.p`. Clicking the `input` reports "covered by div.route-progress". Click the `label:has(...)` instead.
 - `agent-browser find text 'Save & submit for review'` does not find the button. Use `.btn-group button[data-act=submit]`. When the test is already In Progress, the header has a second `[data-act=submit]` ("Submit for review"), so scope to `.btn-group`.
 - A wrong password keeps the modal open with "Incorrect password — signature not applied" in `.modal .form-error`. Five failures lock the account for 15 minutes, and signature failures count toward the five. While locked, a signature returns 423.
+- Submit refuses with the toast "Complete every result first: <analytes>" until every result has a value, and opens no modal. The toast fades, so read `.toasts` right after the click.
 - `/tests/:id` has a `beforeunload` guard when results are dirty. A full `open` or `reload` with unsaved input triggers a native dialog that blocks automation, so save first.
 - Analysts cannot review: POST `/api/tests/:id/review` as tom.fletcher returns 403 FORBIDDEN. The reviewer must also differ from the analyst, and the approver from both.
