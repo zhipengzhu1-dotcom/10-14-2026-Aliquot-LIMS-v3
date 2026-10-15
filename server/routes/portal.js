@@ -142,7 +142,8 @@ function submissionView(sub, { forClient }) {
   const methods = methodIds.length ? all(`SELECT id, code, version, title, technique FROM methods WHERE id IN (${ph(methodIds)})`, ...methodIds) : [];
   const sampleIds = json(sub.sample_ids, []);
   const samples = sampleIds.length ? all(`SELECT id, code, status, description FROM samples WHERE id IN (${ph(sampleIds)}) AND client_id = ? ORDER BY id`, ...sampleIds, sub.client_id) : [];
-  const out = { ...sub, samples: json(sub.samples, []), method_ids: methodIds, methods, received_samples: samples };
+  const project = sub.project_id ? get('SELECT id, code, title FROM projects WHERE id = ? AND client_id = ?', sub.project_id, sub.client_id) ?? null : null;
+  const out = { ...sub, samples: json(sub.samples, []), method_ids: methodIds, methods, received_samples: samples, project };
   delete out.sample_ids;
   if (forClient) {
     delete out.acknowledged_by;
