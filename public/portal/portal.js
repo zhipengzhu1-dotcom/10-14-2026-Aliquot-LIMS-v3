@@ -703,7 +703,7 @@ async function submitForm() {
         $('.js-add', form).disabled = list.length >= MAX_SAMPLES;
         const n = list.filter((r) => $('[name="s.description"]', r).value.trim()).length;
         const tests = $$('[name=method_ids]:checked', form).length;
-        $('.js-count', form).innerHTML = String(n ? html`<b>${plural(n, 'sample')}</b>${tests ? `, ${plural(tests, 'test')}` : ''}` : html`Name at least one sample to send`);
+        $('.js-count', form).innerHTML = String(n ? html`<b>${plural(n, 'sample')}</b>${tests ? ` · ${plural(tests, 'test')}${n > 1 ? ' on each' : ''}` : ''}` : html`Name at least one sample to send`);
       };
       const addRows = (values) => {
         rows.insertAdjacentHTML('beforeend', values.map((v) => String(sampleRow(v))).join(''));
@@ -818,6 +818,7 @@ async function submissionDetail(id, query) {
           </section>
           <section class="card card-pad"><h2 style="margin-bottom:14px">Handling & shipping</h2>
             <dl class="facts">
+              ${s.project ? html`<dt>Project</dt><dd class="js-project"><span class="mono">${s.project.code}</span> ${s.project.title}</dd>` : ''}
               <dt>Priority</dt><dd>${s.priority}</dd>
               <dt>Sample type</dt><dd>${s.sample_type || '—'}</dd>
               <dt>Storage</dt><dd>${s.storage || '—'}</dd>
