@@ -2,7 +2,7 @@
 # Read-only: is this run's Aliquot worth driving? Exits non-zero with the first failed check.
 # Usage: .claude/skills/verify-lims/scripts/doctor.sh [run-name]
 set -uo pipefail
-ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
+ROOT=$(cd -P "$(dirname "$0")/../../../.." && pwd)
 NAME=${1:-verify}
 RUN="$ROOT/.verify/runs/$NAME"
 fail() { echo "FAIL: $*" >&2; exit 1; }

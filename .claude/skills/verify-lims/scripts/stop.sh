@@ -2,7 +2,7 @@
 # Stops the server this run started, closes its browser session, and removes its data. Keeps .verify/evidence/<run-name>/.
 # Usage: .claude/skills/verify-lims/scripts/stop.sh [run-name]
 set -uo pipefail
-ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
+ROOT=$(cd -P "$(dirname "$0")/../../../.." && pwd)
 NAME=${1:-verify}
 RUN="$ROOT/.verify/runs/$NAME"
 

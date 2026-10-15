@@ -3,7 +3,7 @@
 # Usage: .claude/skills/verify-lims/scripts/launch.sh [run-name]     (run-name defaults to "verify")
 # Prints the base URL. State lives in .verify/runs/<run-name>/ (removed by stop.sh); evidence goes in .verify/evidence/<run-name>/ (kept).
 set -euo pipefail
-ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
+ROOT=$(cd -P "$(dirname "$0")/../../../.." && pwd)
 NAME=${1:-verify}
 RUN="$ROOT/.verify/runs/$NAME"
 EVIDENCE="$ROOT/.verify/evidence/$NAME"

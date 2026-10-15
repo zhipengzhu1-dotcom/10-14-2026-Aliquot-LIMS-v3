@@ -124,6 +124,7 @@ A proof is a set of files in `.verify/evidence/<run>/`, numbered in the order ta
 Proof standards:
 
 - **Drive the real user path.** A browser click as the right role. Use `api.mjs` to read, or to prove a refusal, never to make the change you are claiming works.
+- **Try bad input when a form changed.** Drive blank and partly filled rows, a double click on submit, and too much pasted text, not just the documented path. Three portal bugs passed happy-path reviews this way.
 - **Show the action and the resulting state.** Status badge, toast, signature card, and the API record (`status`, `signatures[].meaning`, `can.*` flags).
 - **Check side effects.** Every write leaves `audit_log` rows (`CREATE`/`UPDATE`/`STATUS`/`SIGN`; entity names are table names such as `tests`, `investigations`, `invoices`). `/api/audit/verify` must still return `ok: true`.
 - **Prove refusals on the server.** A hidden button is not a proof. Call the endpoint as the person who must be refused and capture the 4xx: wrong person or missing permission is 403, wrong state (locked record, open investigation, draft-only action) is 400, another client's portal record is 404.
@@ -139,4 +140,4 @@ Proof standards:
 
 ## Feature map
 
-`features/README.md` indexes one file per user-facing feature, each with routes, real selectors, end state and gotchas. A proof of a feature covers every entry point its file lists, not just the most convenient one. Keep the map honest with `/maintain-verification-skill`.
+`features/README.md` indexes one file per user-facing feature, each with routes, real selectors, end state and gotchas. A proof of a feature covers every entry point its file lists, not just the most convenient one. Each gotcha says which kind it is: an app bug links its issue in the v3 repo, a harness quirk names the evidence for its cause, and an unproven cause is marked as a hypothesis. Keep the map honest with `/maintain-verification-skill`.
