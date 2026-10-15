@@ -168,7 +168,7 @@ if (handFlags.length) {
 
 // The verify skill's feature maps name source paths, rules and Queue tables and `[data-act=…]` / `[name=…]` selectors.
 // A name that no longer exists in the code is drift: the next agent drives the app by a map that lies.
-const FEATURES = path.join(ROOT, '.claude', 'skills', 'verify', 'features');
+const FEATURES = path.join(ROOT, '.claude', 'skills', 'verify-lims', 'features');
 const shipped = ['public', 'server', 'server.js'].flatMap((p) => {
   const file = path.join(ROOT, p);
   return fs.statSync(file).isDirectory() ? [...jsFiles(file)] : [file];
