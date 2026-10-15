@@ -32,6 +32,8 @@ A separate sign-in at `/portal/` where a client's contacts follow their own samp
 
 ## Driving it with agent-browser
 
+Run the viewport and reduced-motion setup from SKILL.md first. Without it the splash covers the nav in the new tab and the drive fails.
+
 ```bash
 agent-browser open "$B/portal/"
 agent-browser wait --fn '!document.getElementById("splash")'   # the splash can cover the demo buttons after they render
@@ -40,6 +42,7 @@ agent-browser scrollintoview '[data-demo="customer@example.com"]'
 agent-browser click '[data-demo="customer@example.com"]'
 agent-browser wait 'header.top nav.nav a[data-nav]'
 agent-browser tab new "$B/portal/#/"                           # clicks stop landing in the sign-in tab (see Gotchas)
+agent-browser wait --fn '!document.getElementById("splash")'
 agent-browser wait 'header.top nav.nav a[data-nav]'
 agent-browser click '.nav a[data-nav=submit]'
 agent-browser wait '#submission input[name="s.description"]'
@@ -74,4 +77,5 @@ End state that proves it:
   curl -s -b .verify/runs/verify/portal-acme.jar "$B/api/portal/submissions"
   ```
   Every non-GET needs `X-Requested-With: aliquot`, or the server answers 403. A portal cookie gets 401 on staff endpoints.
-- **Input wedge after the demo sign-in.** In the tab where the demo sign-in was clicked, agent-browser's later clicks soon stop reaching the page. They still report `✓ Done`, but nothing happens: nav links don't change `location.hash`, "Add another sample" adds no row and test chips don't tick. `fill`, `eval` and `open` keep working, so a filled description is no proof that clicks land. Visiting `#/submit` is not the trigger; the wedge shows up without it. Right after signing in, open a fresh tab with `agent-browser tab new "$B/portal/#/"` and drive everything there; the portal session carries over, and clicks in the new tab keep working through `#/submit` and after it. Check `agent-browser eval 'location.hash'` after each navigation click. The cause is not known.
+- **Input wedge after the demo sign-in.** In the tab where the demo sign-in was clicked, agent-browser's clicks stop reaching the page from the first click after sign-in. They still report `✓ Done`, but nothing happens: nav links don't change `location.hash`, "Add another sample" adds no row and test chips don't tick. `fill`, `eval` and `open` keep working, so a filled description is no proof that clicks land. Visiting `#/submit` is not the trigger; the wedge shows up without it. Right after signing in, open a fresh tab with `agent-browser tab new "$B/portal/#/"` and drive everything there; the portal session carries over, and clicks in the new tab keep working through `#/submit` and after it. Check `agent-browser eval 'location.hash'` after each navigation click. The cause is not known.
+- **Stale script after a `public/portal/` change.** A tab or `open` in an existing session can keep running the old `portal.js` module from cache, so a fix looks like it did nothing. Open a new tab with a cache-busting query, such as `agent-browser tab new "$B/portal/?v=$RANDOM#/"`.
