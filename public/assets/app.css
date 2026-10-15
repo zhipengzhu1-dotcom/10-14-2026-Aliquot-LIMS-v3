@@ -741,7 +741,7 @@ input[type=checkbox], input[type=radio] { accent-color: var(--text); width: 15px
 .sample-rows td { padding: 1px 2px; }
 .sample-rows td:first-child { width: 28px; text-align: center; color: var(--text-3); font: 500 10.5px var(--mono); font-variant-numeric: tabular-nums; }
 .sample-rows td:last-child { width: 30px; }
-.sample-rows input { height: var(--ctl-h); }
+.sample-rows input, .sample-rows select { height: var(--ctl-h); }
 .sample-rows-add { margin-top: 6px; }
 
 /* Method picker: one line per method, meta in aligned right-hand columns. */

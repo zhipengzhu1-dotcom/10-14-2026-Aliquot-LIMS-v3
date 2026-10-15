@@ -169,7 +169,7 @@ a.mono:hover { background: var(--lime); color: #121211; text-decoration: none; }
 .select { appearance: none; padding-right: 36px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a867d' stroke-width='2.5' stroke-linecap='square'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 13px center; }
 .input:hover, .select:hover, .textarea:hover { border-color: var(--muted); }
 .input:focus, .select:focus, .textarea:focus { border-color: var(--ink); box-shadow: inset 0 -2px 0 var(--lime), 0 0 0 3px var(--focus); }
-.input[aria-invalid="true"] { border-color: var(--bad); }
+.input[aria-invalid="true"], .select[aria-invalid="true"] { border-color: var(--bad); }
 .input::placeholder, .textarea::placeholder { color: var(--faint); }
 .grid-2 { display: grid; gap: 16px; }
 .grid-3 { display: grid; gap: 16px; }
@@ -445,12 +445,21 @@ form.card { counter-reset: step; }
 .srow .n::before { content: "#"; }
 .srow-more { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 0 32px; }
 @media (min-width: 720px) { .srow-more { grid-template-columns: repeat(4, 1fr); } }
-.srow-more .input { min-height: 40px; font-size: 14px; }
+.srow-more .input, .srow-more .select { min-height: 40px; font-size: 14px; }
 .srow .linkish { margin-left: 32px; }
 .paste { margin-top: 12px; }
 .paste .btn { margin-top: 8px; }
 .paste .help { margin: 8px 0 0; font-size: 13.5px; color: var(--bad); }
 .paste .help:empty { display: none; }
+.paste .alert { margin: 8px 0; }
+.paste-sum { margin: 12px 0 8px; font-size: 14px; }
+.bad-text { color: var(--bad); font-weight: 600; }
+.paste-table { max-height: 360px; overflow: auto; border: 1px solid var(--line); }
+.paste-table .table { font-size: 13px; }
+.paste-table .table th, .paste-table .table td { padding: 8px 10px; vertical-align: top; }
+.paste-table td:not(.cell-bad) { white-space: nowrap; }
+.paste-table td.cell-bad { background: var(--bad-soft); box-shadow: inset 2px 0 0 var(--bad); }
+.cell-why { margin-top: 2px; font-size: 12px; color: var(--bad); min-width: 160px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { position: relative; display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 8px 14px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); font-size: 13.5px; cursor: pointer; transition: background-color var(--t-2), border-color var(--t-2), color var(--t-2); }
 .chip:hover { border-color: var(--ink); }

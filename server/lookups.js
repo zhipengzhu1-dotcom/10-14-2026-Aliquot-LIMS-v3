@@ -97,6 +97,8 @@ export const PRIORITIES = Object.keys(PRIORITY_TIERS).filter((k) => !PRIORITY_TI
 export const DEFAULT_PRIORITY = 'One week';
 /** SQL ranking `column` by tier urgency, for ORDER BY. */
 export const priorityRank = (column) => `CASE ${column} ${Object.entries(PRIORITY_TIERS).map(([k, t]) => `WHEN '${k}' THEN ${t.rank}`).join(' ')} ELSE 9 END`;
+// Where in the product's life a sample comes from, as the client's own sheet says it.
+export const STAGES = ['Stability', 'R&D', 'Finished product', 'Initial', 'Bulk hold', 'Other'];
 export const RECEIPT_CONDITIONS = ['Acceptable', 'Damaged container', 'Temperature excursion', 'Insufficient quantity', 'Labelling discrepancy'];
 export const SAMPLE_STATUSES = ['Received', 'In Testing', 'In Review', 'Approved', 'Reported', 'Cancelled', 'Disposed'];
 export const SAMPLE_OPEN = ['Received', 'In Testing', 'In Review', 'Approved'];
@@ -167,6 +169,7 @@ export function lookups() {
     priorities: PRIORITIES,
     defaultPriority: DEFAULT_PRIORITY,
     priorityTiers: PRIORITY_TIERS,
+    stages: STAGES,
     receiptConditions: RECEIPT_CONDITIONS,
     sampleStatuses: SAMPLE_STATUSES,
     custodyActions: CUSTODY_ACTIONS,

@@ -572,4 +572,9 @@ export const MIGRATIONS = [
   CREATE INDEX idx_portal_threads_client ON portal_threads(client_id, last_message_at);
   CREATE INDEX idx_portal_messages_thread ON portal_messages(thread_id);
   `,
+  // 5: the client's product code and the sample's stage (stability, R&D, finished product…), as clients list them.
+  `
+  ALTER TABLE samples ADD COLUMN product_code TEXT;
+  ALTER TABLE samples ADD COLUMN stage TEXT;
+  `,
 ];

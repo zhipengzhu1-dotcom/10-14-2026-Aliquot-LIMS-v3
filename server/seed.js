@@ -912,8 +912,8 @@ export function seedDemo() {
     const sub = submitSamples(portalAs('acme'), portalUser('acme'), {
       project_id: P.release, sample_type: 'Drug Product', priority: 'One week', storage: 'Ambient (15–25 °C)', courier: 'FedEx Priority Overnight', tracking_no: '7745 2210 9931', ship_date: localDate(new Date(dayAt(146))),
       samples: [
-        { description: 'Metformin HCl 500 mg Tablets', batch_no: 'MF-2614', client_ref: 'ACME-REL-2614', quantity: '2 × 100 tablets', container: 'HDPE bottle' },
-        { description: 'Metformin HCl 500 mg Tablets', batch_no: 'MF-2615', client_ref: 'ACME-REL-2615', quantity: '2 × 100 tablets', container: 'HDPE bottle' },
+        { description: 'Metformin HCl 500 mg Tablets', product_code: 'MF500', stage: 'Finished product', batch_no: 'MF-2614', client_ref: 'ACME-REL-2614', quantity: '2 × 100 tablets', container: 'HDPE bottle' },
+        { description: 'Metformin HCl 500 mg Tablets', product_code: 'MF500', stage: 'Finished product', batch_no: 'MF-2615', client_ref: 'ACME-REL-2615', quantity: '2 × 100 tablets', container: 'HDPE bottle' },
       ],
       method_ids: [M['ATM-0001'].id, M['ATM-0004'].id, M['ATM-0002'].id],
     });
@@ -927,7 +927,7 @@ export function seedDemo() {
     const sub = submitSamples(portalAs('acme'), portalUser('acme'), {
       project_id: P.release, sample_type: 'Drug Product', priority: 'Next day', storage: 'Ambient (15–25 °C)', courier: 'UPS Next Day Air', tracking_no: '1Z 999 AA1 01 2345 6784', ship_date: localDate(new Date(dayAt(149))),
       notes: 'Batch MF-2618 is needed for a tender — rush please, as agreed with Priya.',
-      samples: [{ description: 'Metformin HCl 500 mg Tablets', batch_no: 'MF-2618', client_ref: 'ACME-REL-2618', quantity: '2 × 100 tablets', container: 'HDPE bottle' }],
+      samples: [{ description: 'Metformin HCl 500 mg Tablets', product_code: 'MF500', stage: 'Finished product', batch_no: 'MF-2618', client_ref: 'ACME-REL-2618', quantity: '2 × 100 tablets', container: 'HDPE bottle' }],
       method_ids: [M['ATM-0001'].id, M['ATM-0004'].id],
     });
     setClock(new Date(work(dayAt(149, 9, 20))));
@@ -938,9 +938,9 @@ export function seedDemo() {
     submitSamples(portalAs('nwt'), portalUser('nwt'), {
       project_id: P.validation, sample_type: 'Drug Product', priority: 'One week', storage: 'Ambient, protect from light', courier: 'DHL Express', tracking_no: 'JD014600006281',
       samples: [
-        { description: 'Ibuprofen 400 mg Tablets — forced degradation (acid)', batch_no: 'IBU-V-221', client_ref: 'FD-ACID', quantity: '30 tablets', container: 'Amber glass vial' },
-        { description: 'Ibuprofen 400 mg Tablets — forced degradation (oxidative)', batch_no: 'IBU-V-221', client_ref: 'FD-OX', quantity: '30 tablets', container: 'Amber glass vial' },
-        { description: 'Ibuprofen 400 mg Tablets — placebo blend', batch_no: 'PLB-0410', client_ref: 'FD-PLB', quantity: '20 g', container: 'Amber glass jar' },
+        { description: 'Ibuprofen 400 mg Tablets — forced degradation (acid)', product_code: 'IBU400', stage: 'R&D', batch_no: 'IBU-V-221', client_ref: 'FD-ACID', quantity: '30 tablets', container: 'Amber glass vial' },
+        { description: 'Ibuprofen 400 mg Tablets — forced degradation (oxidative)', product_code: 'IBU400', stage: 'R&D', batch_no: 'IBU-V-221', client_ref: 'FD-OX', quantity: '30 tablets', container: 'Amber glass vial' },
+        { description: 'Ibuprofen 400 mg Tablets — placebo blend', product_code: 'IBU400-PLB', stage: 'R&D', priority: '3 days', batch_no: 'PLB-0410', client_ref: 'FD-PLB', quantity: '20 g', container: 'Amber glass jar' },
       ],
       notes: 'Forced-degradation samples for the specificity part of the ATM-0010 validation (protocol VP-IBU-01 §5.2). Please test per the protocol.',
       method_ids: [],

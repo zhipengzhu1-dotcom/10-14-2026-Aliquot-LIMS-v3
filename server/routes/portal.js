@@ -13,7 +13,7 @@ import { HttpError, bad, forbidden, notFound, guard, flags } from '../http.js';
 import { assertCan, can, checkPasswordPolicy, hashPassword, verifyPassword } from '../auth.js';
 import { portalAuth, portalLogin, portalLogout, portalCtx, publicPortalUser, portalDestroyOtherSessions } from '../portal-auth.js';
 import { getSettings } from '../settings.js';
-import { SAMPLE_TYPES, STORAGE_CONDITIONS, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, TECHNIQUES, SAMPLE_OPEN, PROJECT_OPEN } from '../lookups.js';
+import { SAMPLE_TYPES, STORAGE_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, TECHNIQUES, SAMPLE_OPEN, PROJECT_OPEN } from '../lookups.js';
 import { clean, nowIso, idList, addDays, today, specText, fixed } from '../util.js';
 import { receiveSamples } from './lab.js';
 import { createProject } from './business.js';
@@ -123,6 +123,9 @@ function cleanSampleRows(rows) {
     .map((s, i) => clean(s, {
       description: { required: true, label: `sample ${i + 1} description` },
       batch_no: { max: 120 }, client_ref: { max: 120 }, quantity: { max: 120 }, container: { max: 120 },
+      product_code: { max: 120, label: `sample ${i + 1} product code` },
+      stage: { type: 'enum', values: STAGES, label: `sample ${i + 1} stage` },
+      priority: { type: 'enum', values: PRIORITIES, label: `sample ${i + 1} turnaround` },
     }));
   if (!out.length) throw bad('Add at least one sample');
   if (out.length > 200) throw bad('Submit at most 200 samples at a time');
@@ -131,7 +134,7 @@ function cleanSampleRows(rows) {
 
 // Client-facing views of lab records — explicit column lists, never SELECT *.
 const CLIENT_SAMPLE = `
-  SELECT s.id, s.code, s.description, s.batch_no, s.client_ref, s.sample_type, s.priority, s.status,
+  SELECT s.id, s.code, s.description, s.product_code, s.batch_no, s.client_ref, s.sample_type, s.stage, s.priority, s.status,
     s.received_at, s.due_date, s.reported_at, p.code AS project_code, p.title AS project_title,
     (SELECT COUNT(*) FROM tests t WHERE t.sample_id = s.id AND t.status != 'Cancelled') AS test_count,
     (SELECT COUNT(*) FROM tests t WHERE t.sample_id = s.id AND t.status = 'Approved') AS tests_done
@@ -379,7 +382,7 @@ export default function routes(r) {
   r.get('/api/portal/lookups', (ctx) => {
     const pu = portalAuth(ctx);
     return {
-      sampleTypes: SAMPLE_TYPES, storageConditions: STORAGE_CONDITIONS, priorities: PRIORITIES, defaultPriority: DEFAULT_PRIORITY, techniques: TECHNIQUES,
+      sampleTypes: SAMPLE_TYPES, storageConditions: STORAGE_CONDITIONS, stages: STAGES, priorities: PRIORITIES, defaultPriority: DEFAULT_PRIORITY, techniques: TECHNIQUES,
       priorityTones: Object.fromEntries(Object.entries(PRIORITY_TIERS).map(([k, t]) => [k, t.tone])),
       requestTypes: REQUEST_TYPES, validationParameters: VALIDATION_PARAMETERS, regulatoryContexts: REGULATORY_CONTEXTS,
       methods: clientMethods(pu.client_id),
