@@ -75,7 +75,7 @@ agent-browser click '[data-demo="daniel.okafor"]'
 agent-browser wait 2000 && agent-browser get title    # "Dashboard · Aliquot" when signed in
 ```
 
-**Switching person.** Open the user menu with `button.me-btn[data-menu="me"]`, then click `button[data-act="logout"]`. Or run `agent-browser cookies clear` and reopen `$B/`.
+**Switching person.** Open the user menu with `button.me-btn[data-menu="me"]`, wait until the logout button is visible (`agent-browser wait '[data-act=logout]'`), then click `button[data-act="logout"]`. Right after sign-in the menu can close again while `.route-progress` covers it, so the click lands on a 0×0 button; if the wait fails, let the page settle and open the menu again. Or run `agent-browser cookies clear` and reopen `$B/`.
 
 **Screenshots** need an absolute path. A relative path lands in `~/.agent-browser/tmp`.
 
