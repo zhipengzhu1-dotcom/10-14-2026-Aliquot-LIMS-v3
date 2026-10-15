@@ -4,7 +4,7 @@
 # The registration comes from gh api at each pass and lives only in the container's arguments, never in a file.
 # Every name here starts with animated-runner, so start, stop and status never touch another project's runners.
 set -euo pipefail
-REPO=zhipengzhu1-dotcom/10-04-2026-Animated-LIMS
+REPO=zhipengzhu1-dotcom/10-14-2026-Aliquot-LIMS-v3
 IMAGE=ghcr.io/actions/actions-runner:2.337.0@sha256:f5a0d9a3d857315f2aed7075a02a29f46927ad198221c3b1c66585ae9fe36c0d
 SLOTS=(1 2)
 LOGS="$HOME/Library/Logs/animated-runner"
