@@ -236,8 +236,10 @@ function showSignIn(message) {
       ${demo.map((a) => html`<button type="button" data-demo="${a.email}"><span class="ini">${initials(a.full_name)}</span><span><b>${a.full_name}</b><small>${a.client_name}</small></span></button>`)}
     </div>` : ''}`);
   const form = $('#signin');
+  let busy = false;
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (busy) return;
     const d = formData(form);
     const errBox = $('.form-error', form);
     if (!d.email.trim() || !d.password) {
@@ -245,6 +247,7 @@ function showSignIn(message) {
       (d.email.trim() ? form.password : form.email).focus();
       return;
     }
+    busy = true;
     const ok = await submitting(form, async () => {
       try {
         await post('/login', { email: d.email.trim(), password: d.password });
@@ -253,7 +256,7 @@ function showSignIn(message) {
         throw err;
       }
       return true;
-    }, 'Signing in');
+    }, 'Signing in').finally(() => { busy = false; });
     if (ok) await boot();
     else if (form.isConnected) form.password.select();
   });
@@ -643,7 +646,7 @@ const EXTRAS = [
   { key: 'shipping', chip: 'Courier & tracking', fields: () => html`<div class="grid-3">
     <label class="field"><span class="label">Courier</span><input class="input" name="courier" placeholder="e.g. FedEx Priority"></label>
     <label class="field"><span class="label">Tracking number</span><input class="input" name="tracking_no"></label>
-    <label class="field"><span class="label">Ship date</span><input class="input" type="date" name="ship_date" min="${todayIso()}"></label>
+    <label class="field"><span class="label">Ship date</span><input class="input" type="date" name="ship_date"></label>
   </div>` },
   { key: 'notes', chip: 'Note to lab', fields: () => html`<label class="field"><span class="label">Anything else we should know</span><textarea class="textarea" name="notes" placeholder="Handling, hazards, who to call"></textarea></label>` },
 ];
@@ -666,6 +669,7 @@ async function submitForm() {
           </div>
           <div class="paste" hidden>
             <label class="field"><span class="label">One sample per line</span><textarea class="textarea js-paste-text" rows="5" placeholder="${'Atorvastatin API, lot 2026-118\nAtorvastatin API, lot 2026-119'}"></textarea></label>
+            <p class="help js-paste-note" role="status"></p>
             <button class="btn btn-sm js-paste-add" type="button">Add these</button>
           </div>
         </section>
@@ -730,10 +734,13 @@ async function submitForm() {
         const box = $('.js-paste-text', form);
         const lines = box.value.split('\n').map((l) => l.trim()).filter(Boolean);
         allRows().filter((r) => !Object.values(readRow(r)).some(Boolean)).forEach((r) => r.remove());
-        addRows(lines.slice(0, MAX_SAMPLES - allRows().length).map((description) => ({ description })));
+        const fit = MAX_SAMPLES - allRows().length;
+        addRows(lines.slice(0, fit).map((description) => ({ description })));
         if (!allRows().length) addRows([{}]);
-        box.value = '';
-        $('.paste', form).hidden = true;
+        const left = lines.slice(fit);
+        box.value = left.join('\n');
+        $('.js-paste-note', form).textContent = left.length ? `Only ${MAX_SAMPLES} samples fit in one submission. ${plural(left.length, 'line was', 'lines were')} not added.` : '';
+        $('.paste', form).hidden = left.length === 0;
       });
       $('.js-filter', form)?.addEventListener('input', (e) => { const q = e.target.value.trim().toLowerCase(); $$('.chips .chip[data-text]', form).forEach((l) => { l.hidden = q && !l.dataset.text.includes(q); }); });
       form.addEventListener('change', (e) => { if (e.target.name === 'priority') $('.js-priority-hint', form).textContent = PRIORITY_HINT[e.target.value] || ''; });
@@ -756,7 +763,17 @@ async function submitForm() {
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const d = formData(form);
-        const samples = allRows().map(readRow).filter((r) => Object.values(r).some(Boolean));
+        const rows = allRows();
+        const samples = rows.map(readRow).filter((r) => Object.values(r).some(Boolean));
+        const unnamed = rows.findIndex((row) => { const r = readRow(row); return !r.description && Object.values(r).some(Boolean); });
+        $$('[name="s.description"]', form).forEach((el) => el.removeAttribute('aria-invalid'));
+        if (unnamed >= 0 && samples.some((r) => r.description)) {
+          const el = $('[name="s.description"]', rows[unnamed]);
+          el.setAttribute('aria-invalid', 'true');
+          el.focus();
+          $('.form-error', form).innerHTML = String(html`<div class="alert alert-bad" role="alert">${ic('alert', 16)}<span>Sample #${unnamed + 1} needs a description.</span></div>`);
+          return;
+        }
         const body = { project_id: d.project_id || null, sample_type: d.sample_type || null, storage: d.storage || null, priority: d.priority, courier: d.courier, tracking_no: d.tracking_no, ship_date: d.ship_date || null, notes: d.notes, method_ids: (d.method_ids || []).map(Number), samples };
         const res = await submitting(form, async () => {
           if (!samples.some((r) => r.description)) throw new Error('Tell us what at least one sample is.');
