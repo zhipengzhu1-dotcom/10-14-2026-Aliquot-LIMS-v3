@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Linux / Node ${{ matrix.node }}
+    # Jobs run in Docker on the owner's Mac (docs/ci-runner.md), so CI tests Linux only, not Windows or macOS.
+    runs-on: [self-hosted, animated]
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.13 is the oldest Node version the README supports.
+        node: ['22.13.0', '24']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm run check
+      - run: npm test
