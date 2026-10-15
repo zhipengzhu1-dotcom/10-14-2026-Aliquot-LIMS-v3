@@ -6,7 +6,7 @@ An analyst opens a test assigned to them, types results (checked live against sp
 
 - Start a test (`[data-act=start]` "Start test", only for the assigned analyst on a Pending test, while their qualification on the method is current) or pick up an unassigned Pending one (`[data-act=claim]` "Pick up this test", only for someone qualified on the method). Both need `tests.perform`, which QA lacks. Toasts: "Test started", "Test assigned to you".
 - Numeric results with a live outcome in `td[data-outcome]`: "Pass", "OOS" for a failing value, "Reported" when the analyte has no limits. Text results with a specification text have a Conforms / Does not toggle; without one they are "Reported".
-- Instrument (`select[name=instrument_id]`), required unless the technique is Physical / Visual or Gravimetric. Instruments out of calibration, Out of Service or in Maintenance are disabled, and Retired ones are not listed. The exception is the instrument already recorded on the test, which stays listed and selectable whatever its state.
+- Instrument (`select[name=instrument_id]`), required unless the technique is Physical / Visual or Gravimetric. Instruments out of calibration, Out of Service or in Maintenance are disabled, and Retired ones are not listed. The exception is the instrument already recorded on the test, which stays listed and selectable whatever its state. In the demo seed, instrument 3 (HPLC-03) is disabled because its calibration is overdue (`cal_state: "overdue"`), even though `GET /api/instruments/3` reports `status: "Available"`.
 - Standards, reagents and columns (`input[name=material_ids]`), raw data reference (`input[name=raw_data_ref]`), comments (`textarea[name=comments]`).
 - Save (`button[data-save]`, PUT `/api/tests/:id`, moves Pending to In Progress).
 - Save & submit (e-sign "Performed", POST `/api/tests/:id/submit`). A failing result opens an OOS investigation automatically.
@@ -46,7 +46,7 @@ agent-browser eval 'document.querySelector(".toasts")?.innerText'      # "Submit
 agent-browser screenshot $E/05-test-submitted.png
 ```
 
-For numeric results, `fill '.r-input[data-rid="<id>"]' 99.8` and read `td[data-outcome]`. A missing instrument shows the toast "Choose the instrument you used before submitting".
+For numeric results, `fill '.r-input[data-rid="<id>"]' 99.8` and read `td[data-outcome]`. A missing instrument shows the toast "Choose the instrument you used before submitting". Toasts stay about 4 seconds and cover the header buttons; wait before retrying.
 
 End state that proves it:
 

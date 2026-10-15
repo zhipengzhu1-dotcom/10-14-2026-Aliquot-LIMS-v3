@@ -15,7 +15,7 @@ Business & Finance turns approved tests into invoice lines, edits the draft, iss
 ## How to get to it (user POV)
 
 - Sign in as `grace.holloway` → **Invoices** in the sidebar (`/invoices`). KPI cards: Ready to bill, Awaiting payment, Overdue; chips for status views.
-- From a project page (`/projects/:id`), the billing card has a `[data-act=invoice]` button, "Invoice $X" or "New invoice".
+- From a project page (`/projects/:id`), the billing card has a `[data-act=invoice]` button, "Invoice $X" or "New invoice". It opens the "New invoice" modal with the project filled in; it does not create a draft by itself.
 - Search with ⌘K for the invoice code.
 
 ## Driving it with agent-browser
@@ -45,7 +45,7 @@ End state that proves it:
 
 - **Screen:** badge SENT, "Issued <date> · due <date>" in the header meta, the line editor replaced by read-only lines, "Issue invoice" gone and "Mark paid" / "Void" present.
 - **API:** `GET /api/invoices/<id>` returns `invoice.status = "Sent"`, `issued_date`, `due_date`, `lines[]` non-empty with `total` matching the Ready-to-bill value, `can.issue` and `can.edit` false, `can.paid` and `can.void` true. `GET /api/invoices/unbilled` no longer lists that project (or lists fewer tests). Each billed test (`GET /api/tests/<id>`) carries `invoice_id` = the new invoice.
-- **Audit:** `GET /api/audit?q=<INV code>` (as daniel.okafor or priya.raman) shows `CREATE` "Draft invoice created", `UPDATE` rows for lines, and `STATUS` "Invoice issued to client", all by grace.holloway. `/api/audit/verify` is `ok: true`.
+- **Audit:** `GET /api/audit?q=<INV code>` (as daniel.okafor or priya.raman) shows `CREATE` "Draft invoice created" and `STATUS` "Invoice issued to client" (plus `UPDATE` "Draft invoice edited" rows only if the draft was edited), all by grace.holloway. `/api/audit/verify` is `ok: true`.
 - **Refusals:** as `tom.fletcher`, POST `/api/invoices` returns 403 (no `billing.edit`). As Grace, PUT `/api/invoices/<id>` on a Sent invoice returns 400 "Issued invoices are locked. Void and re-issue to make changes."; POST `…/issue` on a Sent invoice returns 400 "Only draft invoices can be issued"; POST `…/void` without a reason returns 400 `REASON_REQUIRED`; POST `…/paid` on a Draft returns 400 "Only issued invoices can be marked paid"; POST `…/void` on a Paid invoice returns 400 "A paid invoice can't be voided". Prove the void-on-paid refusal only after reading back status Paid: on a Sent invoice the same call succeeds and voids it.
 
 ## Gotchas

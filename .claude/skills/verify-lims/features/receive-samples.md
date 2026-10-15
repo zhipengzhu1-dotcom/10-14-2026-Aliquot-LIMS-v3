@@ -9,11 +9,11 @@ Log a delivery from a client: one form for the delivery, a row per sample (or pa
   - `select[name=sample_type]`, `select[name=condition]`, `select[name=storage]`, `input[name=location]`, `input[name=received_at]`, `textarea[name=notes]`.
   - Priority `a[data-p="Standard|Rush|Urgent"]`.
 - Sample rows `tbody[data-rows] tr`:
-  - Inputs `input[data-k=description|batch_no|client_ref|quantity|container]`, aria-labels like "Description row 1". Description is required for every non-empty row.
+  - Inputs `input[data-k=description|batch_no|client_ref|quantity|container]`, aria-labels like "Description row 1" and "Batch row 1". Description is required for every non-empty row.
   - `[data-act=add]` "Add row", `[data-act=add5]`, `[data-act=fill]`, delete with `[data-del=<i>]`.
   - `[data-act=paste]` "Paste from spreadsheet": a modal with `textarea[name=text]` and the button "Add rows".
 - Tests: checkboxes `input[name=method_ids]` in `label.method-opt`, filter `input[data-mfilter]`. Due date `input[name=due_date][data-due]`. Summary counters `[data-s=samples|methods|tests|codes]`.
-- Labels: "Print N label(s)" (`[data-act=labels]`) opens `/print/labels` in a new window.
+- Labels: "Print N label(s)" (`[data-act=labels]`) opens `/print/labels` in a new window. It is on the result screen after receiving, not on the form.
 
 ## How to get to it (user POV)
 
@@ -50,6 +50,6 @@ End state that proves it:
 ## Gotchas
 
 - With no method ticked, a confirm modal opens. Click "Receive without tests" (`[data-ok]`). It is an in-DOM modal, not a native dialog.
-- Validation errors are toasts, not inline: "Choose the client", "Add at least one sample", "Every sample needs a description".
+- Validation errors are toasts, not inline: "Choose the client", "Add at least one sample", "Every sample needs a description". A toast stays about 4 seconds (`toast()` timeout 4200 ms) and covers the submit button; wait it out before clicking submit again.
 - Click the `label.method-opt` that contains the method checkbox.
 - The new tests are unassigned. To continue into [test-results.md](test-results.md), assign one as sarah or priya: `/worklist?view=unassigned` → tick `td.sel input[data-id="<test id>"]` → `[data-act=assign]` (disabled until a row is ticked) → click `.modal input[name=analyst_id][value="<user id>"]` (one radio per person, labelled with the name; untrained people are disabled) → "Assign". Toast: "1 test assigned". The analyst must be trained on the method; Tom is trained on ATM-0001, 0002, 0004, 0006 and 0012.

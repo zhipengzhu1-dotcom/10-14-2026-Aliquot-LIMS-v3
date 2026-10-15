@@ -4,7 +4,7 @@ QA reads the append-only, hash-chained audit log, filters it by text, person, ac
 
 ## Sub-features
 
-- **Filter:** `input[name=q]` (code, text, reason), `select[name=user]`, `select[name=action]` (CREATE, UPDATE, STATUS, SIGN, LOGIN, PRINT…), `select[name=entity]` (record type), date `from`/`to`; `a.btn.ghost[href="/audit"]` "Reset". The table shows who, when (UTC), action, record (linked), summary and old → new values with the reason.
+- **Filter:** `input[name=q]` (code, text, reason), `select[name=user]`, `select[name=action]` (CREATE, UPDATE, STATUS, SIGN, LOGIN, LOGIN_FAILED, SIGNATURE_FAILED, CUSTODY, VERIFY, PRINT…), `select[name=entity]` (record type), date `from`/`to`; `a.btn.ghost[href="/audit"]` "Reset". The table shows who, when (UTC), action, record (linked), summary and old → new values with the reason.
 - **Verify integrity:** `button[data-act=verify]` "Verify integrity" calls `GET /api/audit/verify` and renders into `[data-verify]` either `.notice.ok` "Integrity verified. All N audit entries are intact and in sequence" or `.notice.bad` "Integrity check failed at entry #…". The verify call itself writes an audit row.
 - **Export CSV:** `button[data-act=csv]` builds a CSV of the loaded rows client-side and triggers a download named `aliquot-audit-<date>.csv`; toast "Exported N entries".
 
@@ -36,7 +36,7 @@ End state that proves it:
 
 - **Screen:** the green `.notice.ok` with a count; the filtered table shows only rows whose record column carries the code, each row linking to the record.
 - **API:** `GET /api/audit/verify` returns `{ok: true, count: N}` with N equal to the number in the notice. `GET /api/audit?q=<code>&limit=10` returns the same rows as the screen, newest first, each with `username`, `full_name`, `action`, `entity`, `entity_id`, `entity_code`, `summary`, `changes`, `reason`, `at`, `ip`, `prev_hash` and `hash`. The table foot reads "Showing the latest N matching entries".
-- **Side effect of verifying:** a fresh `GET /api/audit?action=…&limit=3` shows the verification row itself as the newest entry (by daniel.okafor), and a second `/api/audit/verify` is still `ok: true` with count + 1.
+- **Side effect of verifying:** a fresh `GET /api/audit?action=…&limit=3` shows the verification row itself as the newest entry (by daniel.okafor): action `VERIFY` on entity `audit_log`, "Audit trail integrity verified (N entries)". A second `/api/audit/verify` is still `ok: true`. Read back through `api.mjs`, the count rises by 2, not 1, because each `api.mjs` call signs in and writes its own `LOGIN` row before the verify.
 - **Refusals:** `GET /api/audit` as `tom.fletcher` or `grace.holloway` returns 403.
 
 ## Gotchas
