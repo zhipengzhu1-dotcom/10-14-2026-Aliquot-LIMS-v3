@@ -36,7 +36,7 @@ End state that proves it:
 
 - **Screen:** the green `.notice.ok` with a count; the filtered table shows only rows whose record column carries the code, each row linking to the record.
 - **API:** `GET /api/audit/verify` returns `{ok: true, count: N}` with N equal to the number in the notice. `GET /api/audit?q=<code>&limit=10` returns the same rows as the screen, newest first, each with `username`, `full_name`, `action`, `entity`, `entity_id`, `entity_code`, `summary`, `changes`, `reason`, `at`, `ip`, `prev_hash` and `hash`. The table foot reads "Showing the latest N matching entries".
-- **Side effect of verifying:** a fresh `GET /api/audit?action=…&limit=3` shows the verification row itself as the newest entry (by daniel.okafor): action `VERIFY` on entity `audit_log`, "Audit trail integrity verified (N entries)". A second `/api/audit/verify` is still `ok: true`. Read back through `api.mjs`, the count rises by 2, not 1, because each `api.mjs` call signs in and writes its own `LOGIN` row before the verify.
+- **Side effect of verifying:** a fresh `GET /api/audit?action=…&limit=3` shows the verification row itself as the newest entry (by daniel.okafor): action `VERIFY` on entity `audit_log`, "Audit trail integrity verified (N entries)". A second `/api/audit/verify` is still `ok: true`. Read back through `api.mjs`, the count rises by 1. It rises by 2 only on a person's first `api.mjs` call in a run, because that call signs in and writes a `LOGIN` row; later calls reuse the saved cookie.
 - **Refusals:** `GET /api/audit` as `tom.fletcher` or `grace.holloway` returns 403.
 
 ## Gotchas

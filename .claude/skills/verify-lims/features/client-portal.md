@@ -27,7 +27,7 @@ A separate sign-in at `/portal/` where a client's contacts follow their own samp
 ## How to get to it (user POV)
 
 - Open `<base>/portal/` and sign in as a client contact.
-- Navigate with the top nav: `.nav a[data-nav=overview|samples|submit|requests|messages]`.
+- Navigate with the top nav: `.nav a[data-nav=overview|samples|submit|requests|messages]`. Below desktop width `.nav` is hidden; use `nav.tabbar a[data-nav=…]` instead.
 - Staff see the other side under **Client portal** in the sidebar (`/portal-inbox`). It opens on Messages. Submissions are at `/portal-inbox?tab=submissions` (open ones by default), and a submission's detail is at `/portal-inbox/submissions/<id>`, with Acknowledge, Decline and "Receive samples" (`button[data-act=receive]`) offered from its `can` flags. Acknowledge and Decline need `portal.respond` (manager, QA, scientist, business); Receive needs `samples.receive` (admin, manager, scientist, analyst). On an open submission priya.raman sees all three, tom.fletcher only Receive, and grace.holloway and daniel.okafor get `can.receive: false`, so no "Receive samples". Requests are at `/portal-inbox?tab=requests` and `/portal-inbox/requests/<id>`.
 
 ## Driving it with agent-browser
@@ -60,7 +60,8 @@ End state that proves it:
 ## Gotchas
 
 - The portal uses its own cookie and session, separate from the staff app's. Signing in to one does not sign in to the other.
-- The nav links render twice (desktop `.nav` and mobile `nav.tabbar`). Scope selectors to `.nav`.
+- The nav links render twice (desktop `.nav` and mobile `nav.tabbar`). Scope selectors to `.nav` on desktop and to `nav.tabbar` at phone width.
+- On desktop the sticky `.send-bar` can cover the "+" chips, and agent-browser refuses the click. Scroll the chip into view first.
 - "Withdraw" on a submission (`.js-withdraw`) calls native `confirm()`, which blocks automation. Before clicking, run `agent-browser eval 'window.confirm=()=>true'`.
 - Portal toasts are a single `.toast` element, not the Staff app's `.toasts`: `agent-browser eval 'document.querySelector(".toast")?.innerText'`.
 - The portal shows a splash and an `.arrive` animation, plus skeleton loaders after about 160 ms. Wait for content selectors, not fixed times.
