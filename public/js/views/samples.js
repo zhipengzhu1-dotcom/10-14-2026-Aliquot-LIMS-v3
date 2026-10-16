@@ -162,7 +162,7 @@ export async function receive(ctx) {
         title: html`<span class="row">${icon('tube', { size: 16 })}2 · Samples</span>`,
         sub: 'One row per container. Tip: paste rows straight from Excel or the client\'s submission form.',
         actions: html`<button type="button" class="btn sm" data-act="paste">${icon('copy', { size: 13 })}Paste from spreadsheet</button><button type="button" class="btn sm" data-act="fill">Copy first description down</button>`,
-        body: html`<div class="table-wrap"><table class="sample-rows"><thead><tr><th>#</th><th>Description *</th><th>Batch / lot</th><th>Client reference</th><th>Quantity</th><th>Container</th><th></th></tr></thead><tbody data-rows></tbody></table></div>
+        body: html`<div class="table-wrap"><table class="sample-rows"><thead><tr><th>#</th><th>Description *</th><th>Product code</th><th>Batch / lot</th><th>Stage</th><th>Client reference</th><th>Quantity</th><th>Container</th><th></th></tr></thead><tbody data-rows></tbody></table></div>
           <div class="row sample-rows-add"><button type="button" class="btn sm" data-act="add">${icon('plus', { size: 13 })}Add row</button><button type="button" class="btn sm ghost" data-act="add5">Add 5 rows</button></div>`,
       })}
 
@@ -194,13 +194,15 @@ export async function receive(ctx) {
   let priority = L.defaultPriority;
 
   const syncRowsFromDom = () => {
-    rows = [...tbody.querySelectorAll('tr')].map((tr) => Object.fromEntries([...tr.querySelectorAll('input')].map((i) => [i.dataset.k, i.value])));
+    rows = [...tbody.querySelectorAll('tr')].map((tr) => Object.fromEntries([...tr.querySelectorAll('[data-k]')].map((i) => [i.dataset.k, i.value])));
   };
   const drawRows = () => {
     tbody.innerHTML = String(html`${rows.map((r, i) => html`<tr>
       <td>${i + 1}</td>
       <td><input data-k="description" value="${r.description || ''}" placeholder="e.g. Metformin HCl 500 mg tablets" aria-label="Description row ${i + 1}"></td>
+      <td><input data-k="product_code" value="${r.product_code || ''}" aria-label="Product code row ${i + 1}"></td>
       <td><input data-k="batch_no" value="${r.batch_no || ''}" aria-label="Batch row ${i + 1}"></td>
+      <td><select data-k="stage" aria-label="Stage row ${i + 1}"><option value="">—</option>${L.stages.map((st) => html`<option ${st === r.stage ? raw('selected') : ''}>${st}</option>`)}</select></td>
       <td><input data-k="client_ref" value="${r.client_ref || ''}" aria-label="Client reference row ${i + 1}"></td>
       <td><input data-k="quantity" value="${r.quantity || ''}" placeholder="2 × 100 tablets" aria-label="Quantity row ${i + 1}"></td>
       <td><input data-k="container" value="${r.container || ''}" placeholder="HDPE bottle" aria-label="Container row ${i + 1}"></td>
@@ -424,7 +426,7 @@ export async function detail(ctx) {
       </div>
       <div class="stack">
         ${card({ title: 'Sample details', body: kv([
-          ['Type', s.sample_type], ['Batch / lot', s.batch_no], ['Client reference', s.client_ref], ['Quantity', s.quantity], ['Container', s.container],
+          ['Type', s.sample_type], ['Product code', s.product_code], ['Stage', s.stage], ['Batch / lot', s.batch_no], ['Client reference', s.client_ref], ['Quantity', s.quantity], ['Container', s.container],
           ['Storage', s.storage], ['Location', s.location], ['Condition', s.condition && s.condition !== 'Acceptable' ? badge(s.condition, 'amber') : s.condition],
           ['Received by', s.received_by_name], ['Due', fmtDate(s.due_date)], s.reported_at && ['CoA issued', fmtDateTime(s.reported_at)], s.notes && ['Notes', s.notes],
         ]) })}
@@ -469,6 +471,8 @@ export async function detail(ctx) {
       body: html`
         ${s.status !== 'Received' ? html`<p class="span-2 notice warn">${icon('shield', { size: 15 })}<span>Testing has started — you'll be asked for a reason. The change is recorded in the audit trail.</span></p>` : ''}
         ${field({ label: 'Description', name: 'description', value: s.description, required: true, span: 2 })}
+        ${field({ label: 'Product code', name: 'product_code', value: s.product_code })}
+        ${field({ label: 'Stage', name: 'stage', type: 'select', options: L.stages, value: s.stage, empty: '—' })}
         ${field({ label: 'Batch / lot', name: 'batch_no', value: s.batch_no })}
         ${field({ label: 'Client reference', name: 'client_ref', value: s.client_ref })}
         ${field({ label: 'Sample type', name: 'sample_type', type: 'select', options: L.sampleTypes, value: s.sample_type, empty: '—' })}

@@ -1,5 +1,5 @@
-// Turnaround tiers: new samples take one of the day-based tiers, which set each Test's due date and surcharged price;
-// the retired Standard / Rush / Urgent tiers are refused as new input but still govern the records that carry them.
+// Turnaround tiers: new samples take one of the day-based tiers, which set each Test's due date and surcharged price,
+// per sample row when a pasted submission gives each row its own; the retired Standard / Rush / Urgent tiers are refused as new input but still govern the records that carry them.
 // Run with:  node --test test/priority.test.js
 
 import { test, before, after } from 'node:test';
@@ -152,4 +152,47 @@ test('a sample stored with a retired tier keeps it, and new tests on it are date
   assert.deepEqual({ due: t.due_date, price: t.price }, { due: addBusinessDays(today(), 1), price: 225 });
   const after = await nadia.ok('GET', `/api/samples/${id}`);
   assert.deepEqual([after.sample.priority, after.sample.description], ['Rush', 'Edited, tier untouched']);
+});
+
+test('a pasted submission keeps each row’s product code, stage and urgency through receipt', async () => {
+  const laura = await portal('customer@example.com');
+  const sub = await laura.ok('POST', '/api/portal/submissions', {
+    priority: 'One week', method_ids: [kf.id],
+    samples: [
+      { description: 'Metformin 500 mg', product_code: 'MF500', batch_no: 'L-1', stage: 'Stability', priority: 'Same day', quantity: '100' },
+      { description: 'Metformin 500 mg', product_code: 'MF500', batch_no: 'L-2', stage: 'Finished product', quantity: '60' },
+    ],
+  });
+  const lab = await nadia.ok('GET', `/api/portal-admin/submissions/${sub.id}`);
+  assert.deepEqual(lab.submission.samples.map((r) => [r.product_code, r.stage, r.priority ?? 'as shipment']), [['MF500', 'Stability', 'Same day'], ['MF500', 'Finished product', 'as shipment']]);
+
+  const rec = await nadia.ok('POST', `/api/portal-admin/submissions/${sub.id}/receive`, { received_at: RECEIVED_AT });
+  assert.deepEqual(rec.samples.map((s) => s.due_date), ['2026-10-14', '2026-10-21']);
+  assert.equal(rec.due_date, '2026-10-21');
+  const got = [];
+  for (const s of rec.samples) {
+    const d = await nadia.ok('GET', `/api/samples/${s.id}`);
+    got.push([d.sample.product_code, d.sample.stage, d.sample.priority, d.sample.batch_no, d.tests[0].due_date, d.tests[0].price]);
+  }
+  assert.deepEqual(got, [['MF500', 'Stability', 'Same day', 'L-1', '2026-10-14', 450], ['MF500', 'Finished product', 'One week', 'L-2', '2026-10-21', 150]]);
+  const mine = await laura.ok('GET', `/api/portal/samples/${rec.samples[0].id}`);
+  assert.deepEqual([mine.sample.product_code, mine.sample.stage], ['MF500', 'Stability']);
+});
+
+test('an unknown stage or a retired row urgency is refused', async () => {
+  const laura = await portal('customer@example.com');
+  const stageRefusal = 'Sample 2 stage must be one of: Stability, R&D, Finished product, Initial, Bulk hold, Other';
+  const badStage = await laura.req('POST', '/api/portal/submissions', { samples: [{ description: 'a' }, { description: 'b', stage: 'Stabilty' }] });
+  assert.deepEqual([badStage.status, badStage.data.error], [400, stageRefusal]);
+  const badTier = await laura.req('POST', '/api/portal/submissions', { samples: [{ description: 'a', priority: 'Rush' }] });
+  assert.deepEqual([badTier.status, badTier.data.error], [400, 'Sample 1 turnaround must be one of: Same day, Next day, 3 days, One week']);
+  const labStage = await nadia.req('POST', '/api/samples/receive', { client_id: acme.id, samples: [{ description: 'a' }, { description: 'b', stage: 'Bulk' }] });
+  assert.deepEqual([labStage.status, labStage.data.error], [400, stageRefusal]);
+
+  const r = await receive('One week');
+  const id = r.data.samples[0].id;
+  await nadia.ok('PUT', `/api/samples/${id}`, { description: 'Tier One week', product_code: 'XY-9', stage: 'Bulk hold' });
+  const s = (await nadia.ok('GET', `/api/samples/${id}`)).sample;
+  assert.deepEqual([s.product_code, s.stage], ['XY-9', 'Bulk hold']);
+  assert.equal((await nadia.req('PUT', `/api/samples/${id}`, { description: 'x', stage: 'Bulk' })).status, 400);
 });

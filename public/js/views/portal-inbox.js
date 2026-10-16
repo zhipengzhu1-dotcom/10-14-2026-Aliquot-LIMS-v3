@@ -209,8 +209,8 @@ export async function submission(ctx) {
         ${card({
           title: `Samples (${s.samples.length})`,
           flush: true,
-          body: html`<div class="table-wrap"><table class="table compact"><thead><tr><th>#</th><th>Description</th><th>Batch / lot</th><th>Client ref.</th><th>Quantity</th><th>Container</th></tr></thead>
-            <tbody>${s.samples.map((r, i) => html`<tr><td class="muted">${i + 1}</td><td>${r.description}</td><td>${r.batch_no || '—'}</td><td>${r.client_ref || '—'}</td><td>${r.quantity || '—'}</td><td>${r.container || '—'}</td></tr>`)}</tbody></table></div>`,
+          body: html`<div class="table-wrap"><table class="table compact"><thead><tr><th>#</th><th>Description</th><th>Product code</th><th>Batch / lot</th><th>Stage</th><th>Turnaround</th><th>Quantity</th><th>Client ref.</th><th>Container</th></tr></thead>
+            <tbody>${s.samples.map((r, i) => html`<tr><td class="muted">${i + 1}</td><td>${r.description}</td><td>${r.product_code || '—'}</td><td>${r.batch_no || '—'}</td><td>${r.stage || '—'}</td><td>${r.priority ? priorityBadge(r.priority) || r.priority : html`<span class="muted">As shipment</span>`}</td><td>${r.quantity || '—'}</td><td>${r.client_ref || '—'}</td><td>${r.container || '—'}</td></tr>`)}</tbody></table></div>`,
         })}
         ${thread ? card({
           title: 'Conversation',
@@ -273,7 +273,7 @@ export async function submission(ctx) {
         ${field({ label: 'Storage', name: 'storage', type: 'select', options: L.storageConditions, value: s.storage, empty: 'Select…' })}
         ${field({ label: 'Location', name: 'location', placeholder: 'e.g. Sample store A · Shelf 2' })}
         ${field({ label: 'Project', name: 'project_id', type: 'select', options: projects.map((p) => [p.id, `${p.code} — ${p.title}`]), value: s.project_id, empty: 'No project' })}
-        ${field({ label: 'Turnaround', name: 'priority', type: 'select', options: L.priorities, value: L.priorities.includes(s.priority) ? s.priority : L.defaultPriority, hint: L.priorities.includes(s.priority) ? 'As the client asked' : `The client asked for ${s.priority}, which is retired` })}
+        ${field({ label: 'Shipment turnaround', name: 'priority', type: 'select', options: L.priorities, value: L.priorities.includes(s.priority) ? s.priority : L.defaultPriority, hint: `${L.priorities.includes(s.priority) ? 'As the client asked' : `The client asked for ${s.priority}, which is retired`}. Rows with their own urgency keep it.` })}
         ${field({ label: 'Due date', name: 'due_date', type: 'date', hint: 'Default: from the turnaround tier' })}
         <div class="field span-2"><span class="label">Tests to assign</span>
           <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 16px;max-height:220px;overflow:auto">

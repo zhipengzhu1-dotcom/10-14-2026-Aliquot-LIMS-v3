@@ -2,9 +2,10 @@
 // because the server falls back to the staff app for unknown paths. All text goes through html``, which
 // escapes every interpolated value.
 
-import { html, raw } from '/js/core/html.js';
+import { html, raw, esc } from '/js/core/html.js';
 import { icon } from '/js/core/icons.js';
 import { snapshot, settle } from '/js/core/motion.js';
+import { parseSheet, planTests } from './sheet.js';
 
 // ---------------------------------------------------------------------------------------------
 // Small helpers
@@ -566,6 +567,8 @@ async function sampleDetail(id) {
         <section class="card card-pad">
           <h2 style="margin-bottom:16px">Details</h2>
           <dl class="facts">
+            <dt>Product code</dt><dd>${s.product_code || '—'}</dd>
+            <dt>Stage</dt><dd>${s.stage || '—'}</dd>
             <dt>Sample type</dt><dd>${s.sample_type || '—'}</dd>
             <dt>Received</dt><dd>${fmtDateTime(s.received_at)}</dd>
             <dt>Due</dt><dd>${fmtDate(s.due_date)}</dd>
@@ -626,16 +629,45 @@ async function coaView(id) {
 // ---------------------------------------------------------------------------------------------
 
 const MAX_SAMPLES = 200;
-const SAMPLE_FIELDS = ['description', 'batch_no', 'client_ref', 'quantity', 'container'];
+const SAMPLE_FIELDS = ['description', 'product_code', 'batch_no', 'client_ref', 'quantity', 'container', 'stage', 'priority'];
+const MORE_FIELDS = SAMPLE_FIELDS.slice(1);
+const MORE_LABEL = 'Add code, lot, stage, urgency, quantity';
+const asShipment = (tier) => `As shipment (${tier})`;
+// The pasted columns the preview shows, in the client's sheet order.
+const PASTE_COLUMNS = [['product_code', 'Code'], ['description', 'Name'], ['batch_no', 'Lot'], ['stage', 'Stage'], ['priority', 'Urgency'], ['test', 'Test'], ['quantity', 'Qty']];
 
-function sampleRow(v = {}) {
-  const more = (name, ph) => html`<input class="input" name="${`s.${name}`}" value="${v[name] || ''}" placeholder="${ph}" aria-label="${ph}">`;
-  const open = ['batch_no', 'client_ref', 'quantity', 'container'].some((k) => v[k]);
+/** One sample row. `v.problems` (from a paste) marks the cells the client still has to fix. */
+function sampleRow(v, lk, shipTier) {
+  const bad = v.problems || {};
+  const invalid = (name) => raw(bad[name] ? `aria-invalid="true" title="${esc(bad[name])}"` : '');
+  const more = (name, ph) => html`<input class="input" name="${`s.${name}`}" value="${v[name] || ''}" placeholder="${ph}" aria-label="${ph}" ${invalid(name)}>`;
+  const pick = (name, label, first, options) => html`<select class="select" name="${`s.${name}`}" aria-label="${label}" ${invalid(name)}>${first}${options.map((o) => html`<option ${o === v[name] ? raw('selected') : ''}>${o}</option>`)}</select>`;
+  const open = MORE_FIELDS.some((k) => v[k] || bad[k]);
   return html`<li class="srow" data-row>
-    <div class="srow-main"><span class="n"></span><input class="input" name="s.description" value="${v.description || ''}" placeholder="What is it? e.g. Atorvastatin API, lot 2026-118" aria-label="Sample description"><button class="btn btn-quiet btn-sm remove" type="button" aria-label="Remove sample">${ic('x', 15)}</button></div>
-    <div class="srow-more" ${open ? '' : raw('hidden')}>${more('batch_no', 'Batch / lot')}${more('client_ref', 'Your reference')}${more('quantity', 'Quantity, e.g. 5 g')}${more('container', 'Container')}</div>
-    <button class="linkish js-more" type="button">${open ? 'Hide details' : 'Add batch, quantity, container'}</button>
+    <div class="srow-main"><span class="n"></span><input class="input" name="s.description" value="${v.description || ''}" placeholder="What is it? e.g. Atorvastatin API, lot 2026-118" aria-label="Sample description" ${invalid('description')}><button class="btn btn-quiet btn-sm remove" type="button" aria-label="Remove sample">${ic('x', 15)}</button></div>
+    <div class="srow-more" ${open ? '' : raw('hidden')}>
+      ${more('product_code', 'Product code')}${more('batch_no', 'Batch / lot')}
+      ${pick('stage', 'Stage', html`<option value="">Stage</option>`, lk.stages)}
+      ${pick('priority', 'Urgency', html`<option value="" class="js-as-ship">${asShipment(shipTier)}</option>`, lk.priorities)}
+      ${more('quantity', 'Quantity, e.g. 100 tablets')}${more('client_ref', 'Your reference')}${more('container', 'Container')}
+    </div>
+    <button class="linkish js-more" type="button">${open ? 'Hide details' : MORE_LABEL}</button>
   </li>`;
+}
+
+/** The paste preview: every parsed row, problem cells highlighted with their message, and what the Test column means. */
+function pastePreview(sheet, plan, { fit }) {
+  if (!sheet.rows.length) return '';
+  const cols = PASTE_COLUMNS.filter(([k]) => sheet.rows.some((r) => r[k] || r.problems[k]));
+  const flagged = sheet.rows.filter((r) => Object.keys(r.problems).length).length;
+  return html`
+    <p class="paste-sum"><b>${plural(sheet.rows.length, 'sample')}</b> found${flagged ? html` · <span class="bad-text">${plural(flagged, 'row needs', 'rows need')} a look</span>` : plan.problem ? '' : ' · all look good'}${sheet.header ? '' : ' · no header row, read as your usual column order'}</p>
+    ${sheet.ignored.length ? html`<p class="small muted">Not read: ${sheet.ignored.join(', ')}.</p>` : ''}
+    ${plan.problem ? html`<div class="alert alert-warn">${ic('alert', 16)}<span>${plan.problem}</span></div>` : ''}
+    ${sheet.rows.length > fit ? html`<div class="alert alert-warn">${ic('alert', 16)}<span>Only ${plural(fit, 'more sample fits', 'more samples fit')} in this submission (${MAX_SAMPLES} at most). The rest stay here to send next time.</span></div>` : ''}
+    <div class="table-wrap paste-table"><table class="table"><thead><tr><th>#</th>${cols.map(([, l]) => html`<th>${l}</th>`)}</tr></thead>
+      <tbody>${sheet.rows.map((r, i) => html`<tr><td class="muted">${i + 1}</td>${cols.map(([k]) => html`<td class="${r.problems[k] ? 'cell-bad' : ''}">${r[k] || (r.problems[k] ? '' : '—')}${r.problems[k] ? html`<div class="cell-why">${r.problems[k]}</div>` : ''}</td>`)}</tr>`)}</tbody>
+    </table></div>`;
 }
 
 // Optional details hide behind "+ chips"; each chip opens its fields, and "Remove" clears them again so nothing hidden is sent.
@@ -661,16 +693,18 @@ async function submitForm() {
       <form class="card slip" id="submission" novalidate>
         <section class="slip-sec">
           <h2><span class="step-n">01</span>What is in the box</h2>
-          <p class="slip-sub">One line per sample. Add batch and quantity if you have them handy.</p>
-          <ol class="srows js-rows">${sampleRow()}</ol>
+          <p class="slip-sub">One line per sample, or paste the rows straight from your spreadsheet.</p>
+          <ol class="srows js-rows">${sampleRow({}, lk, lk.defaultPriority)}</ol>
           <div class="row wrap">
             <button class="btn btn-sm js-add" type="button">${ic('plus', 15)} Add another sample</button>
-            <button class="linkish js-paste" type="button">Paste a list</button>
+            <button class="linkish js-paste" type="button">Paste from a spreadsheet</button>
           </div>
           <div class="paste" hidden>
-            <label class="field"><span class="label">One sample per line</span><textarea class="textarea js-paste-text" rows="5" placeholder="${'Atorvastatin API, lot 2026-118\nAtorvastatin API, lot 2026-119'}"></textarea></label>
+            <label class="field"><span class="label">Paste rows from Excel or Google Sheets</span><textarea class="textarea js-paste-text" rows="4" placeholder="Copy the rows, header row included, and paste them here"></textarea></label>
+            <p class="slip-sub">We read Product Code, Product Name, Lot#, Status, Urgency, Test requested and Quantity, in any order. One sample name per line works too.</p>
+            <div class="js-preview" role="status"></div>
             <p class="help js-paste-note" role="status"></p>
-            <button class="btn btn-sm js-paste-add" type="button">Add these</button>
+            <div class="row wrap"><button class="btn btn-sm btn-primary js-paste-add" type="button" hidden></button><button class="btn btn-sm btn-quiet js-paste-close" type="button">Close</button></div>
           </div>
         </section>
         <section class="slip-sec">
@@ -709,8 +743,9 @@ async function submitForm() {
         const tests = $$('[name=method_ids]:checked', form).length;
         $('.js-count', form).innerHTML = String(n ? html`<b>${plural(n, 'sample')}</b>${tests ? ` · ${plural(tests, 'test')}${n > 1 ? ' on each' : ''}` : ''}` : html`Name at least one sample to send`);
       };
+      const shipTier = () => $('[name=priority]:checked', form)?.value || lk.defaultPriority;
       const addRows = (values) => {
-        rows.insertAdjacentHTML('beforeend', values.map((v) => String(sampleRow(v))).join(''));
+        rows.insertAdjacentHTML('beforeend', values.map((v) => String(sampleRow(v, lk, shipTier()))).join(''));
         update();
       };
       update();
@@ -725,25 +760,64 @@ async function submitForm() {
         if (e.target.closest('.js-more')) {
           const more = $('.srow-more', row);
           more.hidden = !more.hidden;
-          e.target.textContent = more.hidden ? 'Add batch, quantity, container' : 'Hide details';
+          e.target.textContent = more.hidden ? MORE_LABEL : 'Hide details';
           if (!more.hidden) $('input', more).focus();
         }
       });
-      $('.js-paste', form).addEventListener('click', () => { $('.paste', form).hidden = false; $('.js-paste-text', form).focus(); });
+      const box = $('.js-paste-text', form);
+      const blankRows = () => allRows().filter((r) => !Object.values(readRow(r)).some(Boolean));
+      let pasted = { sheet: { rows: [] }, plan: {} };
+      const preview = () => {
+        const sheet = parseSheet(box.value);
+        pasted = { sheet, plan: planTests(sheet.rows, lk.methods) };
+        const fit = MAX_SAMPLES - allRows().length + blankRows().length;
+        $('.js-preview', form).innerHTML = String(pastePreview(sheet, pasted.plan, { fit }));
+        const add = $('.js-paste-add', form);
+        const n = Math.min(sheet.rows.length, fit);
+        add.hidden = n === 0;
+        add.textContent = `Add ${plural(n, 'sample')}`;
+        $('.js-paste-note', form).textContent = '';
+      };
+      const openPaste = () => { $('.paste', form).hidden = false; box.focus(); };
+      $('.js-paste', form).addEventListener('click', openPaste);
+      $('.js-paste-close', form).addEventListener('click', () => { $('.paste', form).hidden = true; });
+      box.addEventListener('input', preview);
+      // Pasting several cells into a name box goes through the same preview instead of landing as one long name.
+      rows.addEventListener('paste', (e) => {
+        const text = e.clipboardData?.getData('text/plain') || '';
+        if (!e.target.matches('[name="s.description"]') || !text.includes('\t')) return;
+        e.preventDefault();
+        box.value = text;
+        openPaste();
+        preview();
+        $('.paste', form).scrollIntoView({ block: 'nearest' });
+      });
       $('.js-paste-add', form).addEventListener('click', () => {
-        const box = $('.js-paste-text', form);
-        const lines = box.value.split('\n').map((l) => l.trim()).filter(Boolean);
-        allRows().filter((r) => !Object.values(readRow(r)).some(Boolean)).forEach((r) => r.remove());
+        blankRows().forEach((r) => r.remove());
         const fit = MAX_SAMPLES - allRows().length;
-        addRows(lines.slice(0, fit).map((description) => ({ description })));
+        const { sheet, plan } = pasted;
+        addRows(sheet.rows.slice(0, fit).map(({ test, ...r }) => r));
         if (!allRows().length) addRows([{}]);
-        const left = lines.slice(fit);
-        box.value = left.join('\n');
-        $('.js-paste-note', form).textContent = left.length ? `Only ${MAX_SAMPLES} samples fit in one submission. ${plural(left.length, 'line was', 'lines were')} not added.` : '';
-        $('.paste', form).hidden = left.length === 0;
+        for (const id of plan.methodIds || []) {
+          const chip = $(`[name=method_ids][value="${id}"]`, form);
+          if (chip) chip.checked = true;
+        }
+        const left = sheet.rows.length - fit;
+        const lines = box.value.replace(/\r\n?/g, '\n').split('\n').filter((l) => l.trim());
+        box.value = left > 0 ? [...(sheet.header ? lines.slice(0, 1) : []), ...lines.slice(-left)].join('\n') : '';
+        preview();
+        $('.js-paste-note', form).textContent = left > 0 ? `Only ${MAX_SAMPLES} samples fit in one submission. ${plural(left, 'row was', 'rows were')} not added.` : '';
+        $('.paste', form).hidden = left <= 0;
+        update();
       });
       $('.js-filter', form)?.addEventListener('input', (e) => { const q = e.target.value.trim().toLowerCase(); $$('.chips .chip[data-text]', form).forEach((l) => { l.hidden = q && !l.dataset.text.includes(q); }); });
-      form.addEventListener('change', (e) => { if (e.target.name === 'priority') $('.js-priority-hint', form).textContent = PRIORITY_HINT[e.target.value] || ''; });
+      form.addEventListener('change', (e) => {
+        if (e.target.name === 'priority') {
+          $('.js-priority-hint', form).textContent = PRIORITY_HINT[e.target.value] || '';
+          $$('.js-as-ship', form).forEach((o) => { o.textContent = asShipment(e.target.value); });
+        }
+        if (e.target.matches('[aria-invalid]')) { e.target.removeAttribute('aria-invalid'); e.target.removeAttribute('title'); }
+      });
       form.addEventListener('click', (e) => {
         const show = e.target.closest('[data-show]');
         if (show) {
@@ -826,8 +900,8 @@ async function submissionDetail(id, query) {
         </section>
         <section class="card">
           <div class="card-head"><h2>What you told us</h2></div>
-          <div class="table-wrap"><table class="table responsive"><thead><tr><th>#</th><th>Description</th><th>Batch / lot</th><th>Your reference</th><th>Quantity</th><th>Container</th></tr></thead>
-          <tbody>${s.samples.map((r, i) => html`<tr><td class="muted">${i + 1}</td><td>${r.description}</td><td data-label="Batch">${r.batch_no || '—'}</td><td data-label="Ref.">${r.client_ref || '—'}</td><td data-label="Qty">${r.quantity || '—'}</td><td data-label="Container">${r.container || '—'}</td></tr>`)}</tbody></table></div>
+          <div class="table-wrap"><table class="table responsive"><thead><tr><th>#</th><th>Description</th><th>Product code</th><th>Batch / lot</th><th>Stage</th><th>Urgency</th><th>Quantity</th><th>Your reference</th><th>Container</th></tr></thead>
+          <tbody>${s.samples.map((r, i) => html`<tr><td class="muted">${i + 1}</td><td>${r.description}</td><td data-label="Code">${r.product_code || '—'}</td><td data-label="Batch">${r.batch_no || '—'}</td><td data-label="Stage">${r.stage || '—'}</td><td data-label="Urgency">${r.priority || s.priority}</td><td data-label="Qty">${r.quantity || '—'}</td><td data-label="Ref.">${r.client_ref || '—'}</td><td data-label="Container">${r.container || '—'}</td></tr>`)}</tbody></table></div>
         </section>
         <div class="grid-2">
           <section class="card card-pad"><h2 style="margin-bottom:14px">Tests requested</h2>

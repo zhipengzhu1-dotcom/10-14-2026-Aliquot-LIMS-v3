@@ -8,7 +8,7 @@ import { bad, guard, flags, queued, workQueue } from '../http.js';
 import { assertCan } from '../auth.js';
 import { getNumber, getSettings } from '../settings.js';
 import {
-  SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, CUSTODY_ACTIONS, METHOD_USABLE, SAMPLE_OPEN, priorityRank, rolesWith,
+  SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, CUSTODY_ACTIONS, METHOD_USABLE, SAMPLE_OPEN, priorityRank, rolesWith,
 } from '../lookups.js';
 import { clean, nowIso, today, addBusinessDays, dateOf, idList, likeTerm, limitParam, round } from '../util.js';
 import {
@@ -88,15 +88,19 @@ export function receiveSamples(ctx, body) {
     .filter((s) => s && typeof s === 'object' && Object.values(s).some((v) => String(v ?? '').trim()))
     .map((s, i) => clean(s, {
       description: { required: true, label: `sample ${i + 1} description` },
-      batch_no: {}, client_ref: {}, quantity: {}, container: {},
-    }));
+      batch_no: {}, client_ref: {}, quantity: {}, container: {}, product_code: { label: `sample ${i + 1} product code` },
+      stage: { type: 'enum', values: STAGES, label: `sample ${i + 1} stage` },
+      priority: { type: 'enum', values: PRIORITIES, label: `sample ${i + 1} turnaround` },
+    }))
+    .map((row) => ({ ...row, priority: row.priority ?? common.priority }));
   if (!rows.length) throw bad('Add at least one sample');
   if (rows.length > 200) throw bad('Receive at most 200 samples at a time');
   const methods = loadUsableMethods(idList(body.method_ids));
-  const due = common.due_date || defaultDueDate(dateOf(common.received_at), methods, common.priority);
+  const dueFor = (priority) => common.due_date || defaultDueDate(dateOf(common.received_at), methods, priority);
 
   const created = tx(() => rows.map((row) => {
     const code = nextCode('S');
+    const due = dueFor(row.priority);
     const id = insert(ctx, 'samples', {
       code, ...common, ...row, due_date: due, status: 'Received', received_by: ctx.user.id, created_at: nowIso(),
     }, { summary: 'Sample received' });
@@ -104,10 +108,10 @@ export function receiveSamples(ctx, body) {
       'INSERT INTO custody_events (sample_id, action, location, note, user_id, at) VALUES (?, ?, ?, ?, ?, ?)',
       id, 'Received', common.location, common.condition !== 'Acceptable' ? `Condition on receipt: ${common.condition}` : null, ctx.user.id, common.received_at,
     );
-    for (const m of methods) createTest(ctx, { id, code }, m, { due, priority: common.priority });
-    return { id, code };
+    for (const m of methods) createTest(ctx, { id, code }, m, { due, priority: row.priority });
+    return { id, code, due_date: due };
   }));
-  return { samples: created, due_date: due };
+  return { samples: created, due_date: created.map((s) => s.due_date).sort().at(-1) };
 }
 
 export function addTestsToSample(ctx, sampleId, methodIds) {
@@ -185,7 +189,7 @@ export default function routes(r) {
     const s = mustGet('SELECT * FROM samples WHERE id = ?', id, 'Sample');
     guard(SAMPLE_RULES.edit(s, ctx.user));
     const b = clean(ctx.body, {
-      description: { required: true }, sample_type: { type: 'enum', values: SAMPLE_TYPES }, batch_no: {}, client_ref: {},
+      description: { required: true }, sample_type: { type: 'enum', values: SAMPLE_TYPES }, batch_no: {}, client_ref: {}, product_code: {}, stage: { type: 'enum', values: STAGES },
       quantity: {}, container: {}, storage: { type: 'enum', values: STORAGE_CONDITIONS }, priority: { type: 'enum', values: [...new Set([...PRIORITIES, s.priority])] },
       due_date: { type: 'date' }, notes: { type: 'text' }, project_id: { type: 'id', ref: 'projects' },
     }, { partial: true });
