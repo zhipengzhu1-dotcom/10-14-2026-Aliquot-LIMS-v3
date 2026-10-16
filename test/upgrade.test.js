@@ -88,3 +88,47 @@ for (const source of sources) {
     }
   });
 }
+
+test('a version 5 database gains append-only sample details, and its audit trail still verifies', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aliquot-upgrade-v5-'));
+  try {
+    let server = await startServer(dataDir);
+    const setup = await fetch(`${server.base}/api/setup`, {
+      method: 'POST', headers: { 'X-Requested-With': 'aliquot', 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'demo' }),
+    });
+    assert.equal(setup.status, 200, server.log());
+    await server.stop();
+
+    const file = path.join(dataDir, 'aliquot.db');
+    const v5 = new DatabaseSync(file);
+    v5.exec('DROP TABLE sample_details; PRAGMA user_version = 5');
+    v5.close();
+    const before = snapshot(file);
+    assert.equal(before.version, 5);
+
+    server = await startServer(dataDir);
+    await server.stop();
+    const after = snapshot(file);
+    assert.equal(after.version, MIGRATIONS.length);
+    assert.equal(after.counts.sample_details, 0);
+    assert.equal(after.counts.samples, before.counts.samples);
+
+    openDb(file);
+    try {
+      assert.ok(verifyChain().ok, 'audit trail verifies after the upgrade');
+    } finally {
+      closeDb();
+    }
+    const db = new DatabaseSync(file);
+    try {
+      const sample = db.prepare('SELECT id FROM samples LIMIT 1').get();
+      db.prepare("INSERT INTO sample_details (sample_id, details, created_at) VALUES (?, '[]', '2026-10-16')").run(sample.id);
+      assert.throws(() => db.prepare("UPDATE sample_details SET details = '[1]'").run(), /sample details are append-only/);
+      assert.throws(() => db.prepare('DELETE FROM sample_details').run(), /sample details are append-only/);
+    } finally {
+      db.close();
+    }
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});

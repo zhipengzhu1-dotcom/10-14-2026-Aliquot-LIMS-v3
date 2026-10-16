@@ -15,7 +15,7 @@ import { portalAuth, portalLogin, portalLogout, portalCtx, publicPortalUser, por
 import { getSettings } from '../settings.js';
 import { SAMPLE_TYPES, STORAGE_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, TECHNIQUES, SAMPLE_OPEN, PROJECT_OPEN } from '../lookups.js';
 import { clean, nowIso, idList, addDays, today, specText, fixed } from '../util.js';
-import { receiveSamples } from './lab.js';
+import { receiveSamples, cleanSampleRows } from './lab.js';
 import { createProject } from './business.js';
 
 export const SUBMISSION_STATUSES = ['Submitted', 'Acknowledged', 'Received', 'Declined', 'Withdrawn'];
@@ -116,21 +116,6 @@ const clientMethods = (clientId) => all(`
   WHERE m.status = 'Effective' AND (m.client_id IS NULL OR m.client_id = ?)
     AND EXISTS (SELECT 1 FROM method_analytes a WHERE a.method_id = m.id)
   ORDER BY m.code`, clientId);
-
-function cleanSampleRows(rows) {
-  const out = (Array.isArray(rows) ? rows : [])
-    .filter((s) => s && typeof s === 'object' && Object.values(s).some((v) => String(v ?? '').trim()))
-    .map((s, i) => clean(s, {
-      description: { required: true, label: `sample ${i + 1} description` },
-      batch_no: { max: 120 }, client_ref: { max: 120 }, quantity: { max: 120 }, container: { max: 120 },
-      product_code: { max: 120, label: `sample ${i + 1} product code` },
-      stage: { type: 'enum', values: STAGES, label: `sample ${i + 1} stage` },
-      priority: { type: 'enum', values: PRIORITIES, label: `sample ${i + 1} turnaround` },
-    }));
-  if (!out.length) throw bad('Add at least one sample');
-  if (out.length > 200) throw bad('Submit at most 200 samples at a time');
-  return out;
-}
 
 // Client-facing views of lab records — explicit column lists, never SELECT *.
 const CLIENT_SAMPLE = `
@@ -239,7 +224,7 @@ export function createPortalAccount(ctx, input, presetPassword = null) {
 export function submitSamples(ctx, pu, input) {
   const b = clean(input, submissionSchema);
   if (b.project_id && !openProjects(pu.client_id).some((p) => p.id === b.project_id)) throw bad('Project not found');
-  const rows = cleanSampleRows(input.samples);
+  const rows = cleanSampleRows(input.samples, { max: 120 });
   const allowed = new Set(clientMethods(pu.client_id).map((m) => m.id));
   const methodIds = idList(input.method_ids);
   if (methodIds.some((id) => !allowed.has(id))) throw bad('One of the selected tests is not available');
