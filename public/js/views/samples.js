@@ -129,6 +129,7 @@ function addBusinessDays(date, n) {
     d.setDate(d.getDate() + 1);
     if (d.getDay() !== 0 && d.getDay() !== 6) left--;
   }
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
   return isoDate(d);
 }
 

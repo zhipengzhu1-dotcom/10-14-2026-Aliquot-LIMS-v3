@@ -125,7 +125,7 @@ test('a retired tier is refused as new input everywhere', async () => {
   }
   const fresh = await receive('One week');
   const edit = await nadia.req('PUT', `/api/samples/${fresh.data.samples[0].id}`, { description: 'Tier One week', priority: 'Rush' });
-  assert.equal(edit.status, 400);
+  assert.deepEqual([edit.status, edit.data.error], [400, refusal]);
   const sub = await laura.ok('POST', '/api/portal/submissions', { priority: 'Next day', samples: [{ description: 'x' }] });
   const rec = await nadia.req('POST', `/api/portal-admin/submissions/${sub.id}/receive`, { priority: 'Urgent' });
   assert.deepEqual([rec.status, rec.data.error], [400, refusal]);
@@ -146,6 +146,8 @@ test('a sample stored with a retired tier keeps it, and new tests on it are date
   const before = await nadia.ok('GET', `/api/samples/${id}`);
   assert.equal(before.sample.priority, 'Rush');
   await nadia.ok('PUT', `/api/samples/${id}`, { description: 'Edited, tier untouched', priority: 'Rush' });
+  const toOtherRetired = await nadia.req('PUT', `/api/samples/${id}`, { description: 'x', priority: 'Urgent' });
+  assert.deepEqual([toOtherRetired.status, toOtherRetired.data.error], [400, 'Priority must be one of: Same day, Next day, 3 days, One week']);
   const added = await nadia.ok('POST', `/api/samples/${id}/tests`, { method_ids: [kf.id] });
   const t = (await nadia.ok('GET', `/api/samples/${id}`)).tests.find((x) => x.id === added.ids[0]);
   // Rush halves the slowest method's turnaround (Karl Fischer: 2 working days) and adds the rush surcharge (50 %).
@@ -195,4 +197,61 @@ test('an unknown stage or a retired row urgency is refused', async () => {
   const s = (await nadia.ok('GET', `/api/samples/${id}`)).sample;
   assert.deepEqual([s.product_code, s.stage], ['XY-9', 'Bulk hold']);
   assert.equal((await nadia.req('PUT', `/api/samples/${id}`, { description: 'x', stage: 'Bulk' })).status, 400);
+});
+
+test('Same day and Next day received at the weekend are due the next working day', async () => {
+  const cases = [
+    ['2026-10-16T12:00:00.000Z', 'Same day', '2026-10-16'],
+    ['2026-10-16T12:00:00.000Z', 'Next day', '2026-10-19'],
+    ['2026-10-17T12:00:00.000Z', 'Same day', '2026-10-19'],
+    ['2026-10-18T12:00:00.000Z', 'Same day', '2026-10-19'],
+    ['2026-10-17T12:00:00.000Z', 'Next day', '2026-10-19'],
+  ];
+  const got = [];
+  for (const [received_at, priority] of cases) {
+    const r = await nadia.ok('POST', '/api/samples/receive', { client_id: acme.id, priority, received_at, samples: [{ description: `Weekend ${priority}` }], method_ids: [kf.id] });
+    got.push([received_at, priority, r.due_date]);
+  }
+  assert.deepEqual(got, cases);
+});
+
+const arrivalNotice = async (laura, subId) => {
+  const { thread_id } = await laura.ok('GET', `/api/portal/submissions/${subId}`);
+  return (await laura.ok('GET', `/api/portal/threads/${thread_id}`)).messages.find((m) => m.body.startsWith('Your samples have arrived')).body;
+};
+
+test('the arrival notice gives each tier’s completion date when a shipment mixes tiers', async () => {
+  const laura = await portal('customer@example.com');
+  const mixed = await laura.ok('POST', '/api/portal/submissions', {
+    priority: 'One week', method_ids: [kf.id],
+    samples: [{ description: 'Week A' }, { description: 'Today', priority: 'Same day' }, { description: 'Week B' }],
+  });
+  const rec = await nadia.ok('POST', `/api/portal-admin/submissions/${mixed.id}/receive`, { received_at: RECEIVED_AT });
+  const [a, today, b] = rec.samples.map((s) => s.code);
+  assert.equal(await arrivalNotice(laura, mixed.id),
+    `Your samples have arrived and are logged as ${a}, ${today}, ${b}. Expected completion: Same day 14 Oct 2026 (${today}); One week 21 Oct 2026 (${a}, ${b}).`);
+
+  const single = await laura.ok('POST', '/api/portal/submissions', { priority: '3 days', method_ids: [kf.id], samples: [{ description: 'One tier' }] });
+  const one = await nadia.ok('POST', `/api/portal-admin/submissions/${single.id}/receive`, { received_at: RECEIVED_AT });
+  assert.equal(await arrivalNotice(laura, single.id), `Your samples have arrived and are logged as ${one.samples[0].code}. Expected completion 19 Oct 2026.`);
+});
+
+test('a submission stored with retired tiers before their retirement is still received under them', async () => {
+  const laura = await portal('customer@example.com');
+  const sub = await laura.ok('POST', '/api/portal/submissions', { priority: 'One week', method_ids: [kf.id], samples: [{ description: 'A' }, { description: 'B' }] });
+  await server.stop();
+  const db = new DatabaseSync(path.join(dataDir, 'aliquot.db'));
+  db.prepare("UPDATE portal_submissions SET priority = 'Rush', samples = ? WHERE id = ?").run(JSON.stringify([{ description: 'A', priority: 'Urgent' }, { description: 'B' }]), sub.id);
+  db.close();
+  server = await startServer(dataDir);
+  BASE = server.base;
+  nadia = await staff('nadia.rossi');
+
+  const override = await nadia.req('POST', `/api/portal-admin/submissions/${sub.id}/receive`, { priority: 'Urgent', received_at: RECEIVED_AT });
+  assert.deepEqual([override.status, override.data.error], [400, 'Priority must be one of: Same day, Next day, 3 days, One week']);
+  const rec = await nadia.ok('POST', `/api/portal-admin/submissions/${sub.id}/receive`, { received_at: RECEIVED_AT });
+  const got = [];
+  for (const s of rec.samples) got.push([(await nadia.ok('GET', `/api/samples/${s.id}`)).sample.priority, s.due_date]);
+  // Karl Fischer takes 2 working days: Urgent keeps both, Rush halves them.
+  assert.deepEqual(got, [['Urgent', '2026-10-16'], ['Rush', '2026-10-15']]);
 });

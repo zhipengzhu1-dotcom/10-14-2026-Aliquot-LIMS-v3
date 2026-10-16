@@ -92,9 +92,11 @@ const hasContent = (v) => (Array.isArray(v) ? v.length > 0 : String(v ?? '').tri
 
 /**
  * The one cleaner for sample rows, from the lab's receipt form and from a client's submission. `max` caps each text
- * field. Every row comes back with `details`, an empty list when the sheet had none.
+ * field; `legacyTiers` admits the retired tiers a submission stored before they were retired may carry. Every row
+ * comes back with `details`, an empty list when the sheet had none.
  */
-export function cleanSampleRows(raw, { max = 500 } = {}) {
+export function cleanSampleRows(raw, { max = 500, legacyTiers = false } = {}) {
+  const tiers = legacyTiers ? Object.keys(PRIORITY_TIERS) : PRIORITIES;
   const rows = (Array.isArray(raw) ? raw : [])
     .filter((s) => s && typeof s === 'object' && Object.values(s).some(hasContent))
     .map((s, i) => ({
@@ -103,7 +105,7 @@ export function cleanSampleRows(raw, { max = 500 } = {}) {
         batch_no: { max }, client_ref: { max }, quantity: { max }, container: { max },
         product_code: { max, label: `sample ${i + 1} product code` },
         stage: { type: 'enum', values: STAGES, label: `sample ${i + 1} stage` },
-        priority: { type: 'enum', values: PRIORITIES, label: `sample ${i + 1} turnaround` },
+        priority: { type: 'enum', values: tiers, label: `sample ${i + 1} turnaround` },
       }),
       details: cleanDetails(s.details, i + 1),
     }));
@@ -112,7 +114,8 @@ export function cleanSampleRows(raw, { max = 500 } = {}) {
   return rows;
 }
 
-export function receiveSamples(ctx, body) {
+/** Receives samples into the lab. `legacyTiers` is for a stored submission, whose tiers were checked when it was made. */
+export function receiveSamples(ctx, body, { legacyTiers = false } = {}) {
   assertCan(ctx, 'samples.receive');
   const common = clean(body, {
     client_id: { type: 'id', ref: 'clients', required: true },
@@ -121,13 +124,13 @@ export function receiveSamples(ctx, body) {
     storage: { type: 'enum', values: STORAGE_CONDITIONS },
     location: { label: 'storage location' },
     condition: { type: 'enum', values: RECEIPT_CONDITIONS, default: 'Acceptable' },
-    priority: { type: 'enum', values: PRIORITIES, default: DEFAULT_PRIORITY },
+    priority: { type: 'enum', values: legacyTiers ? Object.keys(PRIORITY_TIERS) : PRIORITIES, default: DEFAULT_PRIORITY },
     received_at: { type: 'datetime', default: nowIso },
     due_date: { type: 'date' },
     notes: { type: 'text' },
   });
   if (common.project_id) assertProjectTakes(ctx, common.project_id, common.client_id);
-  const rows = cleanSampleRows(body.samples).map((row) => ({ ...row, priority: row.priority ?? common.priority }));
+  const rows = cleanSampleRows(body.samples, { legacyTiers }).map((row) => ({ ...row, priority: row.priority ?? common.priority }));
   const methods = loadUsableMethods(idList(body.method_ids));
   const dueFor = (priority) => common.due_date || defaultDueDate(dateOf(common.received_at), methods, priority);
 
@@ -223,9 +226,11 @@ export default function routes(r) {
     const id = +ctx.params.id;
     const s = mustGet('SELECT * FROM samples WHERE id = ?', id, 'Sample');
     guard(SAMPLE_RULES.edit(s, ctx.user));
-    const b = clean(ctx.body, {
+    // A sample keeps a retired tier it already has; only a change of tier must name a current one.
+    const { priority, ...rest } = ctx.body;
+    const b = clean(priority === s.priority ? rest : ctx.body, {
       description: { required: true }, sample_type: { type: 'enum', values: SAMPLE_TYPES }, batch_no: {}, client_ref: {}, product_code: {}, stage: { type: 'enum', values: STAGES },
-      quantity: {}, container: {}, storage: { type: 'enum', values: STORAGE_CONDITIONS }, priority: { type: 'enum', values: [...new Set([...PRIORITIES, s.priority])] },
+      quantity: {}, container: {}, storage: { type: 'enum', values: STORAGE_CONDITIONS }, priority: { type: 'enum', values: PRIORITIES },
       due_date: { type: 'date' }, notes: { type: 'text' }, project_id: { type: 'id', ref: 'projects' },
     }, { partial: true });
     if (b.project_id && b.project_id !== s.project_id) assertProjectTakes(ctx, b.project_id, s.client_id);

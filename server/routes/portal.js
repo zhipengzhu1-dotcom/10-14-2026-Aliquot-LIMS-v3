@@ -270,10 +270,21 @@ export function acknowledgeSubmission(ctx, id, rawNote) {
   });
 }
 
+const longDate = (date) => new Date(`${date}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+/** The arrival notice's completion line: one date, or each tier's date and samples when a shipment mixes them. */
+function dueSummary(samples) {
+  const dates = new Set(samples.map((s) => s.due_date));
+  if (dates.size === 1) return `Expected completion ${longDate(samples[0].due_date)}.`;
+  const tiers = Object.keys(PRIORITY_TIERS).map((tier) => [tier, samples.filter((s) => s.priority === tier)]).filter(([, list]) => list.length);
+  return `Expected completion: ${tiers.map(([tier, list]) => `${tier} ${longDate(list[0].due_date)} (${list.map((s) => s.code).join(', ')})`).join('; ')}.`;
+}
+
 /** Physical receipt: creates real samples (codes, custody, tests) through the normal receiving workflow. */
 export function receiveSubmission(ctx, id, input = {}) {
   const sub = getSubmission(id);
   guard(SUBMISSION_RULES.receive(sub, ctx.user));
+  clean(input, { priority: { type: 'enum', values: PRIORITIES } }, { partial: true });
   const rows = json(sub.samples, []);
   const methodIds = input.method_ids !== undefined ? idList(input.method_ids) : json(sub.method_ids, []);
   return tx(() => {
@@ -290,11 +301,11 @@ export function receiveSubmission(ctx, id, input = {}) {
       notes: [input.notes, `Client submission ${sub.code}`].filter(Boolean).join('\n'),
       samples: rows,
       method_ids: methodIds,
-    });
+    }, { legacyTiers: true });
     const ids = res.samples.map((s) => s.id);
     update(ctx, 'portal_submissions', sub.id, { status: 'Received', received_by: ctx.user.id, received_at: nowIso(), sample_ids: JSON.stringify(ids), updated_at: nowIso() }, { action: 'STATUS', summary: `Samples received: ${res.samples.map((s) => s.code).join(', ')}` });
     const condition = input.condition && input.condition !== 'Acceptable' ? ` Condition on receipt: ${input.condition}.` : '';
-    notice({ submission_id: sub.id }, `Your samples have arrived and are logged as ${res.samples.map((s) => s.code).join(', ')}.${condition} Expected completion ${new Date(`${res.due_date}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}.`);
+    notice({ submission_id: sub.id }, `Your samples have arrived and are logged as ${res.samples.map((s) => s.code).join(', ')}.${condition} ${dueSummary(res.samples)}`);
     return res;
   });
 }
