@@ -208,7 +208,7 @@ test('sample submission: client submits → lab acknowledges → receives into r
   const method = lk.methods.find((m) => m.code === 'ATM-0002') || lk.methods[0];
   // A client_id in the body is ignored — submissions always belong to the signed-in contact's client.
   const sub = await laura.ok('POST', '/api/portal/submissions', {
-    client_id: ids.other, priority: 'Rush', courier: 'FedEx', tracking_no: '123', notes: 'Line one\n<script>alert(1)</script>',
+    client_id: ids.other, priority: 'Next day', courier: 'FedEx', tracking_no: '123', notes: 'Line one\n<script>alert(1)</script>',
     samples: [{ description: 'Test tablets', batch_no: 'T-1', client_ref: 'R-1' }, { description: 'Test tablets', batch_no: 'T-2' }],
     method_ids: [method.id],
   });

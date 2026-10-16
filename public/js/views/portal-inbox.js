@@ -7,7 +7,7 @@ import { icon } from '../core/icons.js';
 import { navigate, setQuery, refreshNav } from '../core/nav.js';
 import {
   pageHead, card, kv, mountTable, searchBox, segmented, badge, fmtDate, fmtDateTime, relTime, emptyState, field, openForm, openModal,
-  confirmDialog, toast, busy, debounce, plural, localDateTimeValue,
+  confirmDialog, toast, busy, debounce, plural, localDateTimeValue, priorityBadge, priorityTone,
 } from '../core/ui.js';
 import { stepper } from '../core/components.js';
 
@@ -175,7 +175,7 @@ async function submissionsTab(ctx, body, tools) {
       { key: 'code', label: 'Ref', sort: (r) => r.id, render: (r) => html`<a class="code" href="/portal-inbox/submissions/${r.id}">${r.code}</a>` },
       { key: 'client_name', label: 'Client', sort: true, cls: 'title-cell', render: (r) => html`<strong>${r.client_name}</strong><span class="sub-line">${r.submitted_by || ''}</span>` },
       { key: 'sample_count', label: 'Samples', sort: true, render: (r) => html`${plural(r.sample_count, 'sample')}${r.method_count ? html`<span class="sub-line">${plural(r.method_count, 'test')}</span>` : ''}` },
-      { key: 'priority', label: 'Priority', sort: true, render: (r) => badge(r.priority) },
+      { key: 'priority', label: 'Turnaround', sort: true, render: (r) => badge(r.priority, priorityTone(r.priority) || 'gray') },
       { key: 'courier', label: 'Shipping', render: (r) => html`${r.courier || '—'}${r.tracking_no ? html`<span class="sub-line mono">${r.tracking_no}</span>` : ''}` },
       { key: 'created_at', label: 'Submitted', sort: true, render: (r) => html`<span class="nowrap" title="${fmtDateTime(r.created_at)}">${relTime(r.created_at)}</span>` },
       { key: 'status', label: 'Status', sort: true, render: (r) => badge(r.status, SUB_TONE[r.status]) },
@@ -196,7 +196,7 @@ export async function submission(ctx) {
     ${pageHead({
       back: { href: '/portal-inbox?tab=submissions', label: 'Sample submissions' },
       title: html`Submission <span class="code" style="font-size:inherit">${s.code}</span>`,
-      badges: html`${badge(s.status, SUB_TONE[s.status])} ${s.priority !== 'Standard' ? badge(s.priority) : ''}`,
+      badges: html`${badge(s.status, SUB_TONE[s.status])} ${priorityBadge(s.priority)}`,
       sub: html`${s.client_name} · ${s.submitted_by || 'client'} <span class="muted">(${s.submitted_by_email || ''})</span> · submitted ${fmtDateTime(s.created_at)}`,
       actions: html`
         ${d.can.acknowledge ? html`<button class="btn" data-act="ack">${icon('check', { size: 15 })}Acknowledge</button>` : ''}
@@ -273,7 +273,8 @@ export async function submission(ctx) {
         ${field({ label: 'Storage', name: 'storage', type: 'select', options: L.storageConditions, value: s.storage, empty: 'Select…' })}
         ${field({ label: 'Location', name: 'location', placeholder: 'e.g. Sample store A · Shelf 2' })}
         ${field({ label: 'Project', name: 'project_id', type: 'select', options: projects.map((p) => [p.id, `${p.code} — ${p.title}`]), value: s.project_id, empty: 'No project' })}
-        ${field({ label: 'Due date', name: 'due_date', type: 'date', hint: 'Default: from method turnaround times' })}
+        ${field({ label: 'Turnaround', name: 'priority', type: 'select', options: L.priorities, value: L.priorities.includes(s.priority) ? s.priority : L.defaultPriority, hint: L.priorities.includes(s.priority) ? 'As the client asked' : `The client asked for ${s.priority}, which is retired` })}
+        ${field({ label: 'Due date', name: 'due_date', type: 'date', hint: 'Default: from the turnaround tier' })}
         <div class="field span-2"><span class="label">Tests to assign</span>
           <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 16px;max-height:220px;overflow:auto">
             ${usable.map((m) => html`<label class="check"><input type="checkbox" name="method_ids" value="${m.id}" ${s.method_ids.includes(m.id) ? raw('checked') : ''}><span><span class="code">${m.code}</span> ${m.title}</span></label>`)}

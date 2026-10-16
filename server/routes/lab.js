@@ -8,7 +8,7 @@ import { bad, guard, flags, queued, workQueue } from '../http.js';
 import { assertCan } from '../auth.js';
 import { getNumber, getSettings } from '../settings.js';
 import {
-  SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, PRIORITIES, CUSTODY_ACTIONS, METHOD_USABLE, SAMPLE_OPEN, rolesWith,
+  SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, CUSTODY_ACTIONS, METHOD_USABLE, SAMPLE_OPEN, priorityRank, rolesWith,
 } from '../lookups.js';
 import { clean, nowIso, today, addBusinessDays, dateOf, idList, likeTerm, limitParam, round } from '../util.js';
 import {
@@ -33,18 +33,15 @@ function loadUsableMethods(ids) {
   });
 }
 
-function surchargePct(priority) {
-  if (priority === 'Rush') return getNumber('rush_surcharge_pct');
-  if (priority === 'Urgent') return getNumber('urgent_surcharge_pct');
-  return 0;
+function priceFor(method, priority) {
+  const { surcharge } = PRIORITY_TIERS[priority];
+  return round(method.price * (1 + (surcharge ? getNumber(surcharge) : 0) / 100), 2);
 }
 
-const priceFor = (method, priority) => round(method.price * (1 + surchargePct(priority) / 100), 2);
-
 export function defaultDueDate(fromDate, methods, priority) {
+  const tier = PRIORITY_TIERS[priority];
   const tat = methods.length ? Math.max(...methods.map((m) => m.tat_days || 5)) : 10;
-  const days = priority === 'Urgent' ? Math.min(2, tat) : priority === 'Rush' ? Math.ceil(tat / 2) : tat;
-  return addBusinessDays(fromDate, days);
+  return addBusinessDays(fromDate, tier.days ?? tier.tatDays(tat));
 }
 
 export function createTest(ctx, sample, method, { due, priority }) {
@@ -81,7 +78,7 @@ export function receiveSamples(ctx, body) {
     storage: { type: 'enum', values: STORAGE_CONDITIONS },
     location: { label: 'storage location' },
     condition: { type: 'enum', values: RECEIPT_CONDITIONS, default: 'Acceptable' },
-    priority: { type: 'enum', values: PRIORITIES, default: 'Standard' },
+    priority: { type: 'enum', values: PRIORITIES, default: DEFAULT_PRIORITY },
     received_at: { type: 'datetime', default: nowIso },
     due_date: { type: 'date' },
     notes: { type: 'text' },
@@ -189,7 +186,7 @@ export default function routes(r) {
     guard(SAMPLE_RULES.edit(s, ctx.user));
     const b = clean(ctx.body, {
       description: { required: true }, sample_type: { type: 'enum', values: SAMPLE_TYPES }, batch_no: {}, client_ref: {},
-      quantity: {}, container: {}, storage: { type: 'enum', values: STORAGE_CONDITIONS }, priority: { type: 'enum', values: PRIORITIES },
+      quantity: {}, container: {}, storage: { type: 'enum', values: STORAGE_CONDITIONS }, priority: { type: 'enum', values: [...new Set([...PRIORITIES, s.priority])] },
       due_date: { type: 'date' }, notes: { type: 'text' }, project_id: { type: 'id', ref: 'projects' },
     }, { partial: true });
     if (b.project_id && b.project_id !== s.project_id) assertProjectTakes(ctx, b.project_id, s.client_id);
@@ -264,7 +261,7 @@ export default function routes(r) {
       params.push(t, t, t, t, t);
     }
     const limit = limitParam(q.limit, 1000, 3000);
-    const order = q.scope === 'open' ? `CASE s.priority WHEN 'Urgent' THEN 0 WHEN 'Rush' THEN 1 ELSE 2 END, t.due_date, t.id` : 't.id DESC';
+    const order = q.scope === 'open' ? `${priorityRank('s.priority')}, t.due_date, t.id` : 't.id DESC';
     return all(`${TEST_SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY ${order} LIMIT ${limit}`, ...params);
   });
 

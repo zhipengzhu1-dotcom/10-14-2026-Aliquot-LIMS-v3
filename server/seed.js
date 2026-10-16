@@ -456,7 +456,7 @@ export function seedDemo() {
     on(spec.at, () => {
       const res = receiveSamples(as(receiver), {
         client_id: C[spec.client], project_id: P[spec.project], sample_type: spec.type, storage: spec.storage, location: spec.location,
-        priority: spec.priority || 'Standard', condition: spec.condition || 'Acceptable',
+        priority: spec.priority || 'One week', condition: spec.condition || 'Acceptable',
         received_at: new Date(spec.at).toISOString(), notes: spec.notes,
         samples: [{ description: spec.description, batch_no: spec.batch, client_ref: spec.clientRef, quantity: spec.quantity, container: spec.container }],
         method_ids: spec.methods.map((c) => M[c].id),
@@ -468,7 +468,7 @@ export function seedDemo() {
 
     // Labs work faster on short-turnaround and rush work: scale the simulated pace to the due date.
     const tat = Math.max(...spec.methods.map((c) => M[c].def.tat_days));
-    const pace = Math.min(1.2, Math.max(0.45, tat / 6)) * (spec.priority === 'Rush' ? 0.55 : 1);
+    const pace = Math.min(1.2, Math.max(0.45, tat / 6)) * (spec.priority === '3 days' ? 0.55 : 1);
     let lastApproval = 0;
     for (const code of spec.methods) {
       const chain = { parent: sample };
@@ -571,7 +571,7 @@ export function seedDemo() {
       po_number: body.po, budget: body.budget, start_date: localDate(new Date(dayAt(day))), due_date: body.due != null ? localDate(new Date(NOW + body.due * DAY)) : null, description: body.description,
     }).id;
   });
-  project(-2, 'ACME', { key: 'release', title: 'Metformin HCl 500 mg Tablets — Batch Release Testing', type: 'Routine / Release Testing', po: 'PO-ACME-44710', budget: 90000, due: 200, description: 'Full release testing of commercial batches per ACME specification SPEC-MF500-07 (rev. 7). Standard TAT 5 working days; rush on request.' }, 'priya.raman');
+  project(-2, 'ACME', { key: 'release', title: 'Metformin HCl 500 mg Tablets — Batch Release Testing', type: 'Routine / Release Testing', po: 'PO-ACME-44710', budget: 90000, due: 200, description: 'Full release testing of commercial batches per ACME specification SPEC-MF500-07 (rev. 7). One-week turnaround as standard; faster tiers on request.' }, 'priya.raman');
   project(-1, 'CNTS', { key: 'stability', title: 'CX-114 25 mg Capsules — ICH Stability Study (3 batches)', type: 'Stability Study', po: 'CNTS-PO-88213', budget: 72000, due: 400, description: 'ICH Q1A(R2) stability: 25 °C/60 % RH (long term) and 40 °C/75 % RH (accelerated). Pulls at 0, 1, 3, 6, 9, 12 months. Protocol STP-CX114-01.' }, 'samuel.mensah');
   project(5, 'ACME', { key: 'solvents', title: 'Residual Solvents — Metformin API Supplier Qualification', type: 'Routine / Release Testing', po: 'PO-ACME-45102', budget: 6000, due: -80, description: 'Testing of 6 lots from a new API supplier for residual solvents and LOD.' }, 'amara.nwosu');
   project(8, 'CNTS', { key: 'raw', title: 'Raw Material Testing Programme 2026', type: 'Routine / Release Testing', po: 'CNTS-BO-2026-01', budget: 15000, due: 90, description: 'Identity, LOD and water content for incoming excipient lots (blanket order).' }, 'priya.raman');
@@ -591,7 +591,7 @@ export function seedDemo() {
     const spec = {
       at: dayAt(d, int(9, 15), int(0, 59)), client: 'ACME', project: 'release', type: 'Drug Product', storage: 'Ambient (15–25 °C)',
       location: 'Sample store A — shelf 2', description: 'Metformin HCl 500 mg Film-coated Tablets', batch: `MF5-${n}`, clientRef: `ACME-REL-${n}`,
-      quantity: '2 × 100 tablets', container: 'HDPE bottle', methods: releaseMethods, priority: chance(0.12) ? 'Rush' : 'Standard',
+      quantity: '2 × 100 tablets', container: 'HDPE bottle', methods: releaseMethods, priority: chance(0.12) ? '3 days' : 'One week',
       delay: chance(0.07) ? between(3, 6) : 0,
     };
     if (d >= 64 && d <= 68 && !invalidatedDone) {
@@ -609,7 +609,7 @@ export function seedDemo() {
       spec.at = Math.min(spec.at, NOW - 9 * DAY);
       spec.delay = 0;
     }
-    if (spec.at > NOW - 3 * DAY) spec.priority = 'Standard';
+    if (spec.at > NOW - 3 * DAY) spec.priority = 'One week';
     planSample(spec);
   }
 
@@ -640,7 +640,7 @@ export function seedDemo() {
     planSample({
       at: NOW - between(20, 30) * HOUR, client: 'CNTS', project: 'stability', type: 'Stability', storage: 'Ambient, protect from light',
       location: 'Sample store B — shelf 1', description: 'CX-114 25 mg Capsules — Photostability (ICH Q1B option 2)', batch, clientRef: `PHOTO-${batch}`,
-      quantity: '30 capsules', container: 'Quartz dish, foil control', methods: ['ATM-0011', 'ATM-0012'], age: 0.3, hot: false, priority: 'Rush', receiver: 'samuel.mensah',
+      quantity: '30 capsules', container: 'Quartz dish, foil control', methods: ['ATM-0011', 'ATM-0012'], age: 0.3, hot: false, priority: '3 days', receiver: 'samuel.mensah',
     });
   }
 
@@ -700,7 +700,7 @@ export function seedDemo() {
     planSample({
       at: daysAgo < 1 ? t : work(t), client: 'ACME', project: 'release', type: 'Drug Product', storage: 'Ambient (15–25 °C)', location: 'Sample store A — shelf 2',
       description: batch.startsWith('MF10') ? 'Metformin HCl 1000 mg Film-coated Tablets' : 'Metformin HCl 500 mg Film-coated Tablets', batch, clientRef: `ACME-REL-${batch.slice(-4)}`,
-      quantity: '2 × 100 tablets', container: 'HDPE bottle', methods: releaseMethods, priority: daysAgo < 1 ? 'Rush' : 'Standard',
+      quantity: '2 × 100 tablets', container: 'HDPE bottle', methods: releaseMethods, priority: daysAgo < 1 ? '3 days' : 'One week',
     });
   });
   [[2.6, 'Hypromellose 2910 (5 cP)'], [1.1, 'Sodium Starch Glycolate']].forEach(([daysAgo, description], i) => {
@@ -897,7 +897,7 @@ export function seedDemo() {
     const t = thread('ACME', 'Rush slot for batch MF-2611?');
     say(t, 'pu:acme', 'Hi Priya,\nWe have a market shortage on 500 mg and need batch MF-2611 released as fast as possible. Is a rush slot available next week?\n\nThanks, Laura');
     setClock(new Date(work(dayAt(112, 14, 5))));
-    say(t, 'priya.raman', 'Hi Laura,\nYes — book it as Rush when you submit and we will run assay, dissolution and water on receipt day. Expect the CoA within 2 working days.\n\nPriya');
+    say(t, 'priya.raman', 'Hi Laura,\nYes — book it as Next day when you submit and we will run assay, dissolution and water on receipt day. Expect the CoA the next working day.\n\nPriya');
     setClock(new Date(work(dayAt(112, 15, 20))));
     say(t, 'pu:acme', 'Perfect, thank you. Shipping tomorrow on priority overnight.');
   });
@@ -910,7 +910,7 @@ export function seedDemo() {
   // Submission received by the lab — creates real samples through normal receiving.
   on(dayAt(146, 9, 5), () => {
     const sub = submitSamples(portalAs('acme'), portalUser('acme'), {
-      project_id: P.release, sample_type: 'Drug Product', priority: 'Standard', storage: 'Ambient (15–25 °C)', courier: 'FedEx Priority Overnight', tracking_no: '7745 2210 9931', ship_date: localDate(new Date(dayAt(146))),
+      project_id: P.release, sample_type: 'Drug Product', priority: 'One week', storage: 'Ambient (15–25 °C)', courier: 'FedEx Priority Overnight', tracking_no: '7745 2210 9931', ship_date: localDate(new Date(dayAt(146))),
       samples: [
         { description: 'Metformin HCl 500 mg Tablets', batch_no: 'MF-2614', client_ref: 'ACME-REL-2614', quantity: '2 × 100 tablets', container: 'HDPE bottle' },
         { description: 'Metformin HCl 500 mg Tablets', batch_no: 'MF-2615', client_ref: 'ACME-REL-2615', quantity: '2 × 100 tablets', container: 'HDPE bottle' },
@@ -925,18 +925,18 @@ export function seedDemo() {
   // Shipment announced and acknowledged, still in transit.
   on(dayAt(148, 15, 30), () => {
     const sub = submitSamples(portalAs('acme'), portalUser('acme'), {
-      project_id: P.release, sample_type: 'Drug Product', priority: 'Rush', storage: 'Ambient (15–25 °C)', courier: 'UPS Next Day Air', tracking_no: '1Z 999 AA1 01 2345 6784', ship_date: localDate(new Date(dayAt(149))),
+      project_id: P.release, sample_type: 'Drug Product', priority: 'Next day', storage: 'Ambient (15–25 °C)', courier: 'UPS Next Day Air', tracking_no: '1Z 999 AA1 01 2345 6784', ship_date: localDate(new Date(dayAt(149))),
       notes: 'Batch MF-2618 is needed for a tender — rush please, as agreed with Priya.',
       samples: [{ description: 'Metformin HCl 500 mg Tablets', batch_no: 'MF-2618', client_ref: 'ACME-REL-2618', quantity: '2 × 100 tablets', container: 'HDPE bottle' }],
       method_ids: [M['ATM-0001'].id, M['ATM-0004'].id],
     });
     setClock(new Date(work(dayAt(149, 9, 20))));
-    acknowledgeSubmission(as('priya.raman'), sub.id, 'Rush confirmed. We will start testing on receipt.');
+    acknowledgeSubmission(as('priya.raman'), sub.id, 'Next-day turnaround confirmed. We will start testing on receipt.');
   });
   // New this morning — waiting for the lab.
   on(NOW - 3 * HOUR, () => {
     submitSamples(portalAs('nwt'), portalUser('nwt'), {
-      project_id: P.validation, sample_type: 'Drug Product', priority: 'Standard', storage: 'Ambient, protect from light', courier: 'DHL Express', tracking_no: 'JD014600006281',
+      project_id: P.validation, sample_type: 'Drug Product', priority: 'One week', storage: 'Ambient, protect from light', courier: 'DHL Express', tracking_no: 'JD014600006281',
       samples: [
         { description: 'Ibuprofen 400 mg Tablets — forced degradation (acid)', batch_no: 'IBU-V-221', client_ref: 'FD-ACID', quantity: '30 tablets', container: 'Amber glass vial' },
         { description: 'Ibuprofen 400 mg Tablets — forced degradation (oxidative)', batch_no: 'IBU-V-221', client_ref: 'FD-OX', quantity: '30 tablets', container: 'Amber glass vial' },
