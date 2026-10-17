@@ -93,11 +93,10 @@ export function gridFromText(text, kind) {
   return grid.map((r) => r.map((c) => c.trim())).filter((r) => r.some(Boolean));
 }
 
-const isHeader = (cells) => {
-  const filled = cells.filter(Boolean);
-  const known = filled.filter((c) => FIELD_FOR_HEADER.has(norm(c))).length;
-  return known > 0 && known >= Math.ceil(filled.length / 2);
-};
+// A client's sheet may carry more of its own headings than ours, so the first row is headings when it names more of
+// ours than the next row does, not when most of its cells are ours.
+const knownHeadings = (cells = []) => cells.filter((c) => FIELD_FOR_HEADER.has(norm(c))).length;
+const isHeader = (grid) => knownHeadings(grid[0]) > knownHeadings(grid[1]);
 
 const columnName = (i) => `Column ${i < 26 ? String.fromCharCode(65 + i) : i + 1}`;
 const widthOf = (grid) => Math.max(0, ...grid.map((r) => r.length));
@@ -111,7 +110,7 @@ const labelsOf = (grid, header) => Array.from({ length: widthOf(grid) }, (_, i) 
  */
 export function guessMapping(grid, fields) {
   const width = widthOf(grid);
-  const header = width > 1 && isHeader(grid[0]);
+  const header = width > 1 && isHeader(grid);
   const order = width === 1 ? ['description'] : fields;
   const taken = new Set();
   const columns = labelsOf(grid, header).map((label, i) => {
