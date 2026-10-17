@@ -69,7 +69,53 @@ function assertProjectTakes(ctx, projectId, clientId) {
   guard(PROJECT_RULES.receive(p, ctx.user));
 }
 
-export function receiveSamples(ctx, body) {
+export const DETAIL_LIMITS = { count: 30, label: 60, value: 500 };
+
+/** What a client's sheet said about a sample beyond our fields: [{ label, value }] in sheet order, empty values dropped. */
+function cleanDetails(raw, n) {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) throw bad(`Sample ${n} extra details must be a list`);
+  const details = raw.map((d) => {
+    if (!d || typeof d.label !== 'string' || typeof d.value !== 'string') throw bad(`Sample ${n} has an extra detail without a text label and value`);
+    return { label: d.label.trim(), value: d.value.trim() };
+  }).filter((d) => d.value);
+  if (details.length > DETAIL_LIMITS.count) throw bad(`Sample ${n} has more than ${DETAIL_LIMITS.count} extra details`);
+  for (const { label, value } of details) {
+    if (!label) throw bad(`Sample ${n} has an extra detail without a label`);
+    if (label.length > DETAIL_LIMITS.label) throw bad(`Sample ${n} extra detail label is too long (max ${DETAIL_LIMITS.label} characters)`);
+    if (value.length > DETAIL_LIMITS.value) throw bad(`Sample ${n} extra detail "${label}" is too long (max ${DETAIL_LIMITS.value} characters)`);
+  }
+  return details;
+}
+
+const hasContent = (v) => (Array.isArray(v) ? v.length > 0 : String(v ?? '').trim() !== '');
+
+/**
+ * The one cleaner for sample rows, from the lab's receipt form and from a client's submission. `max` caps each text
+ * field; `legacyTiers` admits the retired tiers a submission stored before they were retired may carry. Every row
+ * comes back with `details`, an empty list when the sheet had none.
+ */
+export function cleanSampleRows(raw, { max = 500, legacyTiers = false } = {}) {
+  const tiers = legacyTiers ? Object.keys(PRIORITY_TIERS) : PRIORITIES;
+  const rows = (Array.isArray(raw) ? raw : [])
+    .filter((s) => s && typeof s === 'object' && Object.values(s).some(hasContent))
+    .map((s, i) => ({
+      ...clean(s, {
+        description: { required: true, label: `sample ${i + 1} description` },
+        batch_no: { max }, client_ref: { max }, quantity: { max }, container: { max },
+        product_code: { max, label: `sample ${i + 1} product code` },
+        stage: { type: 'enum', values: STAGES, label: `sample ${i + 1} stage` },
+        priority: { type: 'enum', values: tiers, label: `sample ${i + 1} turnaround` },
+      }),
+      details: cleanDetails(s.details, i + 1),
+    }));
+  if (!rows.length) throw bad('Add at least one sample');
+  if (rows.length > 200) throw bad('At most 200 samples at a time');
+  return rows;
+}
+
+/** Receives samples into the lab. `legacyTiers` is for a stored submission, whose tiers were checked when it was made. */
+export function receiveSamples(ctx, body, { legacyTiers = false } = {}) {
   assertCan(ctx, 'samples.receive');
   const common = clean(body, {
     client_id: { type: 'id', ref: 'clients', required: true },
@@ -78,38 +124,29 @@ export function receiveSamples(ctx, body) {
     storage: { type: 'enum', values: STORAGE_CONDITIONS },
     location: { label: 'storage location' },
     condition: { type: 'enum', values: RECEIPT_CONDITIONS, default: 'Acceptable' },
-    priority: { type: 'enum', values: PRIORITIES, default: DEFAULT_PRIORITY },
+    priority: { type: 'enum', values: legacyTiers ? Object.keys(PRIORITY_TIERS) : PRIORITIES, default: DEFAULT_PRIORITY },
     received_at: { type: 'datetime', default: nowIso },
     due_date: { type: 'date' },
     notes: { type: 'text' },
   });
   if (common.project_id) assertProjectTakes(ctx, common.project_id, common.client_id);
-  const rows = (Array.isArray(body.samples) ? body.samples : [])
-    .filter((s) => s && typeof s === 'object' && Object.values(s).some((v) => String(v ?? '').trim()))
-    .map((s, i) => clean(s, {
-      description: { required: true, label: `sample ${i + 1} description` },
-      batch_no: {}, client_ref: {}, quantity: {}, container: {}, product_code: { label: `sample ${i + 1} product code` },
-      stage: { type: 'enum', values: STAGES, label: `sample ${i + 1} stage` },
-      priority: { type: 'enum', values: PRIORITIES, label: `sample ${i + 1} turnaround` },
-    }))
-    .map((row) => ({ ...row, priority: row.priority ?? common.priority }));
-  if (!rows.length) throw bad('Add at least one sample');
-  if (rows.length > 200) throw bad('Receive at most 200 samples at a time');
+  const rows = cleanSampleRows(body.samples, { legacyTiers }).map((row) => ({ ...row, priority: row.priority ?? common.priority }));
   const methods = loadUsableMethods(idList(body.method_ids));
   const dueFor = (priority) => common.due_date || defaultDueDate(dateOf(common.received_at), methods, priority);
 
-  const created = tx(() => rows.map((row) => {
+  const created = tx(() => rows.map(({ details, ...row }) => {
     const code = nextCode('S');
     const due = dueFor(row.priority);
     const id = insert(ctx, 'samples', {
       code, ...common, ...row, due_date: due, status: 'Received', received_by: ctx.user.id, created_at: nowIso(),
     }, { summary: 'Sample received' });
+    if (details.length) insert(ctx, 'sample_details', { sample_id: id, details: JSON.stringify(details), created_at: nowIso() }, { code, summary: 'Client sheet details kept' });
     run(
       'INSERT INTO custody_events (sample_id, action, location, note, user_id, at) VALUES (?, ?, ?, ?, ?, ?)',
       id, 'Received', common.location, common.condition !== 'Acceptable' ? `Condition on receipt: ${common.condition}` : null, ctx.user.id, common.received_at,
     );
     for (const m of methods) createTest(ctx, { id, code }, m, { due, priority: row.priority });
-    return { id, code, due_date: due };
+    return { id, code, due_date: due, priority: row.priority };
   }));
   return { samples: created, due_date: created.map((s) => s.due_date).sort().at(-1) };
 }
@@ -180,6 +217,7 @@ export default function routes(r) {
       notebook: all(`SELECT n.id, n.code, n.title, n.status, u.full_name AS author_name, n.created_at FROM notebook_entries n JOIN users u ON u.id = n.author_id WHERE n.sample_id = ? ORDER BY n.id DESC`, id),
       investigations: all(`SELECT id, code, type, title, status, severity FROM investigations WHERE sample_id = ? ORDER BY id DESC`, id),
       signatures: all(`SELECT * FROM signatures WHERE entity = 'samples' AND entity_id = ? ORDER BY id`, id),
+      details: JSON.parse(get('SELECT details FROM sample_details WHERE sample_id = ?', id)?.details ?? '[]'),
       can: flags(SAMPLE_RULES, sample, ctx.user),
     };
   });
@@ -188,9 +226,11 @@ export default function routes(r) {
     const id = +ctx.params.id;
     const s = mustGet('SELECT * FROM samples WHERE id = ?', id, 'Sample');
     guard(SAMPLE_RULES.edit(s, ctx.user));
-    const b = clean(ctx.body, {
+    // A sample keeps a retired tier it already has; only a change of tier must name a current one.
+    const { priority, ...rest } = ctx.body;
+    const b = clean(priority === s.priority ? rest : ctx.body, {
       description: { required: true }, sample_type: { type: 'enum', values: SAMPLE_TYPES }, batch_no: {}, client_ref: {}, product_code: {}, stage: { type: 'enum', values: STAGES },
-      quantity: {}, container: {}, storage: { type: 'enum', values: STORAGE_CONDITIONS }, priority: { type: 'enum', values: [...new Set([...PRIORITIES, s.priority])] },
+      quantity: {}, container: {}, storage: { type: 'enum', values: STORAGE_CONDITIONS }, priority: { type: 'enum', values: PRIORITIES },
       due_date: { type: 'date' }, notes: { type: 'text' }, project_id: { type: 'id', ref: 'projects' },
     }, { partial: true });
     if (b.project_id && b.project_id !== s.project_id) assertProjectTakes(ctx, b.project_id, s.client_id);

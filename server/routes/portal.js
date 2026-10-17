@@ -15,8 +15,9 @@ import { portalAuth, portalLogin, portalLogout, portalCtx, publicPortalUser, por
 import { getSettings } from '../settings.js';
 import { SAMPLE_TYPES, STORAGE_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, TECHNIQUES, SAMPLE_OPEN, PROJECT_OPEN } from '../lookups.js';
 import { clean, nowIso, idList, addDays, today, specText, fixed } from '../util.js';
-import { receiveSamples } from './lab.js';
+import { receiveSamples, cleanSampleRows } from './lab.js';
 import { createProject } from './business.js';
+import { previewXlsx } from '../ooxml.js';
 
 export const SUBMISSION_STATUSES = ['Submitted', 'Acknowledged', 'Received', 'Declined', 'Withdrawn'];
 export const SUBMISSION_OPEN = ['Submitted', 'Acknowledged'];
@@ -116,21 +117,6 @@ const clientMethods = (clientId) => all(`
   WHERE m.status = 'Effective' AND (m.client_id IS NULL OR m.client_id = ?)
     AND EXISTS (SELECT 1 FROM method_analytes a WHERE a.method_id = m.id)
   ORDER BY m.code`, clientId);
-
-function cleanSampleRows(rows) {
-  const out = (Array.isArray(rows) ? rows : [])
-    .filter((s) => s && typeof s === 'object' && Object.values(s).some((v) => String(v ?? '').trim()))
-    .map((s, i) => clean(s, {
-      description: { required: true, label: `sample ${i + 1} description` },
-      batch_no: { max: 120 }, client_ref: { max: 120 }, quantity: { max: 120 }, container: { max: 120 },
-      product_code: { max: 120, label: `sample ${i + 1} product code` },
-      stage: { type: 'enum', values: STAGES, label: `sample ${i + 1} stage` },
-      priority: { type: 'enum', values: PRIORITIES, label: `sample ${i + 1} turnaround` },
-    }));
-  if (!out.length) throw bad('Add at least one sample');
-  if (out.length > 200) throw bad('Submit at most 200 samples at a time');
-  return out;
-}
 
 // Client-facing views of lab records — explicit column lists, never SELECT *.
 const CLIENT_SAMPLE = `
@@ -239,7 +225,7 @@ export function createPortalAccount(ctx, input, presetPassword = null) {
 export function submitSamples(ctx, pu, input) {
   const b = clean(input, submissionSchema);
   if (b.project_id && !openProjects(pu.client_id).some((p) => p.id === b.project_id)) throw bad('Project not found');
-  const rows = cleanSampleRows(input.samples);
+  const rows = cleanSampleRows(input.samples, { max: 120 });
   const allowed = new Set(clientMethods(pu.client_id).map((m) => m.id));
   const methodIds = idList(input.method_ids);
   if (methodIds.some((id) => !allowed.has(id))) throw bad('One of the selected tests is not available');
@@ -285,10 +271,21 @@ export function acknowledgeSubmission(ctx, id, rawNote) {
   });
 }
 
+const longDate = (date) => new Date(`${date}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+/** The arrival notice's completion line: one date, or each tier's date and samples when a shipment mixes them. */
+function dueSummary(samples) {
+  const dates = new Set(samples.map((s) => s.due_date));
+  if (dates.size === 1) return `Expected completion ${longDate(samples[0].due_date)}.`;
+  const tiers = Object.keys(PRIORITY_TIERS).map((tier) => [tier, samples.filter((s) => s.priority === tier)]).filter(([, list]) => list.length);
+  return `Expected completion: ${tiers.map(([tier, list]) => `${tier} ${longDate(list[0].due_date)} (${list.map((s) => s.code).join(', ')})`).join('; ')}.`;
+}
+
 /** Physical receipt: creates real samples (codes, custody, tests) through the normal receiving workflow. */
 export function receiveSubmission(ctx, id, input = {}) {
   const sub = getSubmission(id);
   guard(SUBMISSION_RULES.receive(sub, ctx.user));
+  clean(input, { priority: { type: 'enum', values: PRIORITIES } }, { partial: true });
   const rows = json(sub.samples, []);
   const methodIds = input.method_ids !== undefined ? idList(input.method_ids) : json(sub.method_ids, []);
   return tx(() => {
@@ -305,13 +302,28 @@ export function receiveSubmission(ctx, id, input = {}) {
       notes: [input.notes, `Client submission ${sub.code}`].filter(Boolean).join('\n'),
       samples: rows,
       method_ids: methodIds,
-    });
+    }, { legacyTiers: true });
     const ids = res.samples.map((s) => s.id);
     update(ctx, 'portal_submissions', sub.id, { status: 'Received', received_by: ctx.user.id, received_at: nowIso(), sample_ids: JSON.stringify(ids), updated_at: nowIso() }, { action: 'STATUS', summary: `Samples received: ${res.samples.map((s) => s.code).join(', ')}` });
     const condition = input.condition && input.condition !== 'Acceptable' ? ` Condition on receipt: ${input.condition}.` : '';
-    notice({ submission_id: sub.id }, `Your samples have arrived and are logged as ${res.samples.map((s) => s.code).join(', ')}.${condition} Expected completion ${new Date(`${res.due_date}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}.`);
+    notice({ submission_id: sub.id }, `Your samples have arrived and are logged as ${res.samples.map((s) => s.code).join(', ')}.${condition} ${dueSummary(res.samples)}`);
     return res;
   });
+}
+
+/** A client's workbook as grids, one per visible sheet that has rows, for the sample sheet mapping. Nothing is stored. */
+function readWorkbook(buf, filename) {
+  if (!/\.xlsx$/i.test(String(filename ?? ''))) throw bad('Upload an .xlsx or .csv file. Save other spreadsheets as one of those first, or paste the rows.');
+  let book;
+  try {
+    book = previewXlsx(buf);
+  } catch (e) {
+    if (e instanceof HttpError && /^This is not a valid/.test(e.message)) throw bad('This is not a valid Excel file. Save it from Excel as .xlsx and try again.');
+    throw e;
+  }
+  const sheets = book.sheets.map(({ name, rows, truncated }) => ({ name, rows: rows.map((r) => r.map((c) => c.trim())).filter((r) => r.some(Boolean)), truncated })).filter((sh) => sh.rows.length);
+  if (!sheets.length) throw bad('That workbook has no rows to read');
+  return { sheets };
 }
 
 const NEEDS_RESPONSE = { reply: 'Nothing to update', propose: 'Summarise the proposal for the client', decline: 'Give the client a reason' };
@@ -487,6 +499,12 @@ export default function routes(r) {
     const thread = get('SELECT id FROM portal_threads WHERE submission_id = ? AND client_id = ?', sub.id, pu.client_id);
     return { submission: submissionView(sub, { forClient: true }), thread_id: thread?.id ?? null, can: flags(CLIENT_SUBMISSION_RULES, sub, pu) };
   }, open);
+
+  // The body is buffered before portalAuth runs, so the limit stays at the JSON routes' 2 MB.
+  r.post('/api/portal/sheets', (ctx) => {
+    portalAuth(ctx);
+    return readWorkbook(ctx.rawBody, ctx.req.headers['x-filename']);
+  }, { auth: false, raw: true, limit: 2 * 1024 * 1024 });
 
   r.post('/api/portal/submissions', (ctx) => submitSamples(portalCtx(ctx, portalAuth(ctx)), ctx.portal, ctx.body), open);
 

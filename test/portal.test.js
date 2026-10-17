@@ -5,10 +5,12 @@
 
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { startServer } from './server.js';
+import { makeXlsx, zip } from '../server/ooxml.js';
 
 let BASE;
 const PASSWORD = 'demo1234';
@@ -242,6 +244,67 @@ test('sample submission: client submits → lab acknowledges → receives into r
   assert.ok(thread.messages.some((m) => m.side === 'system' && m.body.includes(rec.samples[0].code)));
 });
 
+const SENTINEL = 'Sentinel-7731';
+const DETAILS = [{ label: 'Storage temp', value: '2-8 °C' }, { label: 'Supplier', value: SENTINEL }];
+const assertNoDetails = (label, body) => {
+  const raw = JSON.stringify(body);
+  assert.ok(!raw.includes(SENTINEL) && !raw.includes('"details"'), `${label} must not carry the client's extra detail`);
+};
+
+test('extra detail from a client’s sheet is kept with the submission and lands on the received sample', async () => {
+  const laura = await portal(LAURA);
+  const sub = await laura.ok('POST', '/api/portal/submissions', {
+    samples: [{ description: 'Aspirin', details: [...DETAILS, { label: 'Blank column', value: '  ' }] }, { description: 'Plain' }],
+  });
+  assert.deepEqual((await laura.ok('GET', `/api/portal/submissions/${sub.id}`)).submission.samples.map((r) => r.details), [DETAILS, []]);
+  assert.deepEqual((await manager.ok('GET', `/api/portal-admin/submissions/${sub.id}`)).submission.samples.map((r) => r.details), [DETAILS, []]);
+
+  const nadia = await staff('nadia.rossi');
+  const rec = await nadia.ok('POST', `/api/portal-admin/submissions/${sub.id}/receive`, {});
+  const [kept, plain] = rec.samples;
+  assert.deepEqual((await nadia.ok('GET', `/api/samples/${kept.id}`)).details, DETAILS);
+  assert.deepEqual((await nadia.ok('GET', `/api/samples/${plain.id}`)).details, []);
+  const trail = await (await staff('daniel.okafor')).ok('GET', '/api/audit?entity=sample_details&limit=2000');
+  assert.deepEqual(trail.filter((a) => a.entity_code === kept.code).map((a) => [a.action, a.summary, a.username]), [['CREATE', 'Client sheet details kept', 'nadia.rossi']]);
+
+  assertNoDetails('the lab CoA', await nadia.ok('GET', `/api/samples/${kept.id}/coa`));
+  assertNoDetails('the lab sample list', await nadia.ok('GET', '/api/samples?q=Aspirin'));
+  assertNoDetails('sample labels', await nadia.ok('GET', `/api/samples/labels?ids=${kept.id}`));
+  assertNoDetails('the client sample view', await laura.ok('GET', `/api/portal/samples/${kept.id}`));
+  assertNoDetails('the client sample list', await laura.ok('GET', '/api/portal/samples?status=all'));
+});
+
+test('an issued certificate never carries the sample’s extra detail, in the lab or the portal', async () => {
+  const laura = await portal(LAURA);
+  const reported = (await laura.ok('GET', '/api/portal/samples?status=reported'))[0];
+  await server.stop();
+  const db = new DatabaseSync(path.join(dataDir, 'aliquot.db'));
+  db.prepare('INSERT INTO sample_details (sample_id, details, created_at) VALUES (?, ?, ?)').run(reported.id, JSON.stringify(DETAILS), '2026-10-16T09:00:00.000Z');
+  db.close();
+  server = await startServer(dataDir);
+  BASE = server.base;
+
+  assert.deepEqual((await manager.ok('GET', `/api/samples/${reported.id}`)).details, DETAILS);
+  assertNoDetails('the lab CoA', await manager.ok('GET', `/api/samples/${reported.id}/coa`));
+  assertNoDetails('the portal CoA', await laura.ok('GET', `/api/portal/samples/${reported.id}/coa`));
+});
+
+test('extra detail is refused past its limits or in the wrong shape', async () => {
+  const laura = await portal(LAURA);
+  const submit = async (details) => {
+    const r = await laura.post('/api/portal/submissions', { samples: [{ description: 'Aspirin', details }] });
+    return [r.status, r.data.error];
+  };
+  const many = Array.from({ length: 31 }, (_, i) => ({ label: `Column ${i + 1}`, value: 'x' }));
+  assert.deepEqual(await submit(many), [400, 'Sample 1 has more than 30 extra details']);
+  assert.deepEqual(await submit([{ label: 'L'.repeat(61), value: 'x' }]), [400, 'Sample 1 extra detail label is too long (max 60 characters)']);
+  assert.deepEqual(await submit([{ label: 'Notes', value: 'v'.repeat(501) }]), [400, 'Sample 1 extra detail "Notes" is too long (max 500 characters)']);
+  assert.deepEqual(await submit([{ label: '', value: 'x' }]), [400, 'Sample 1 has an extra detail without a label']);
+  assert.deepEqual(await submit([{ label: 'Count', value: 3 }]), [400, 'Sample 1 has an extra detail without a text label and value']);
+  assert.deepEqual(await submit('Storage: cold'), [400, 'Sample 1 extra details must be a list']);
+  assert.equal((await laura.post('/api/portal/submissions', { samples: [{ details: DETAILS }] })).data.error, 'Sample 1 description is required');
+});
+
 test('a submission names only one of the client’s own open projects, the ones the portal offers', async () => {
   const project = async (client_id) => (await manager.ok('POST', '/api/projects', { client_id, title: 'Submission target', type: 'Other', status: 'Active' })).id;
   const open = await project(ids.acme);
@@ -356,4 +419,29 @@ test('portal actions are written to the audit trail under the contact’s identi
   const list = await qa.ok('GET', '/api/audit?entity=portal_submissions&limit=2000');
   assert.ok(list.some((r) => r.username === who && r.action === 'CREATE'), 'submissions are audited');
   assert.ok(list.some((r) => r.username === 'nadia.rossi' && r.action === 'STATUS'), 'staff receipt is audited');
+});
+
+const upload = (client, filename, buf) => fetch(`${BASE}/api/portal/sheets`, {
+  method: 'POST',
+  headers: { 'X-Requested-With': 'aliquot', 'X-Filename': filename, 'Content-Type': 'application/octet-stream', ...(client?.cookie ? { Cookie: client.cookie } : {}) },
+  body: buf,
+}).then(async (r) => [r.status, await r.json()]);
+
+test('a client’s .xlsx sample sheet comes back as one grid per sheet with rows, and nothing else is accepted', async () => {
+  const laura = await portal(LAURA);
+  const book = makeXlsx({ sheets: [
+    { name: 'Samples', rows: [['Product Name', 'Lot#', 'Storage'], [' Aspirin ', 'L1', '2-8 °C'], ['', ' ', ''], ['Paracetamol', 'L2', '']] },
+    { name: 'Notes', rows: [] },
+  ] });
+  assert.deepEqual(await upload(laura, 'samples.xlsx', book), [200, {
+    sheets: [{ name: 'Samples', rows: [['Product Name', 'Lot#', 'Storage'], ['Aspirin', 'L1', '2-8 °C'], ['Paracetamol', 'L2', '']], truncated: false }],
+  }]);
+
+  assert.equal((await upload(null, 'samples.xlsx', book))[0], 401);
+  assert.equal((await upload(manager, 'samples.xlsx', book))[0], 401, 'a staff session is not a portal session');
+  assert.deepEqual(await upload(laura, 'samples.pdf', book), [400, { error: 'Upload an .xlsx or .csv file. Save other spreadsheets as one of those first, or paste the rows.' }]);
+  assert.deepEqual(await upload(laura, 'samples.xlsx', Buffer.from('Product Name,Lot\nAspirin,L1')), [400, { error: 'This is not a valid Excel file. Save it from Excel as .xlsx and try again.' }]);
+  const macro = zip([['[Content_Types].xml', '<Types/>'], ['xl/workbook.xml', '<workbook/>'], ['xl/vbaProject.bin', 'x']]);
+  assert.deepEqual(await upload(laura, 'samples.xlsx', macro), [400, { error: 'Files containing macros are not accepted' }]);
+  assert.deepEqual(await upload(laura, 'empty.xlsx', makeXlsx({ sheets: [{ name: 'Sheet1', rows: [] }] })), [400, { error: 'That workbook has no rows to read' }]);
 });

@@ -577,4 +577,17 @@ export const MIGRATIONS = [
   ALTER TABLE samples ADD COLUMN product_code TEXT;
   ALTER TABLE samples ADD COLUMN stage TEXT;
   `,
+  // 6: what a client's sheet said about a sample beyond our fields, as JSON [{ label, value }] in the client's column
+  // order. Kept off samples so SELECT s.* (the lab CoA, SAMPLE_SELECT, project sample lists) never carries it, and
+  // append-only because it records what the client declared.
+  `
+  CREATE TABLE sample_details (
+    id INTEGER PRIMARY KEY,
+    sample_id INTEGER NOT NULL UNIQUE REFERENCES samples(id),
+    details TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE TRIGGER sample_details_no_update BEFORE UPDATE ON sample_details BEGIN SELECT RAISE(ABORT, 'sample details are append-only'); END;
+  CREATE TRIGGER sample_details_no_delete BEFORE DELETE ON sample_details BEGIN SELECT RAISE(ABORT, 'sample details are append-only'); END;
+  `,
 ];

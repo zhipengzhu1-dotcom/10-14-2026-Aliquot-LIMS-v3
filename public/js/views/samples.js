@@ -9,6 +9,7 @@ import {
   localDateTimeValue, todayIso, isoDate, person, badge, debounce,
 } from '../core/ui.js';
 import { stepper, signatureList, recordFooter, wireRecordFooter } from '../core/components.js';
+import { LAB_FIELDS, gridFromText, guessMapping, readSheet } from '/portal/sheet.js';
 
 const SAMPLE_STEPS = ['Received', 'In Testing', 'In Review', 'Approved', 'Reported'];
 const openLabels = (ids) => window.open(`/print/labels?ids=${ids.join(',')}`, '_blank');
@@ -129,6 +130,7 @@ function addBusinessDays(date, n) {
     d.setDate(d.getDate() + 1);
     if (d.getDay() !== 0 && d.getDay() !== 6) left--;
   }
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
   return isoDate(d);
 }
 
@@ -194,12 +196,12 @@ export async function receive(ctx) {
   let priority = L.defaultPriority;
 
   const syncRowsFromDom = () => {
-    rows = [...tbody.querySelectorAll('tr')].map((tr) => Object.fromEntries([...tr.querySelectorAll('[data-k]')].map((i) => [i.dataset.k, i.value])));
+    rows = [...tbody.querySelectorAll('tr')].map((tr) => Object.fromEntries([...tr.querySelectorAll('[data-k]')].map((i) => [i.dataset.k, i.dataset.k === 'details' ? JSON.parse(i.value) : i.value])));
   };
   const drawRows = () => {
     tbody.innerHTML = String(html`${rows.map((r, i) => html`<tr>
       <td>${i + 1}</td>
-      <td><input data-k="description" value="${r.description || ''}" placeholder="e.g. Metformin HCl 500 mg tablets" aria-label="Description row ${i + 1}"></td>
+      <td><input data-k="description" value="${r.description || ''}" placeholder="e.g. Metformin HCl 500 mg tablets" aria-label="Description row ${i + 1}">${r.details?.length ? html`<input type="hidden" data-k="details" value="${JSON.stringify(r.details)}"><div class="small muted row-details">${r.details.map((x) => `${x.label}: ${x.value}`).join(' · ')}</div>` : ''}</td>
       <td><input data-k="product_code" value="${r.product_code || ''}" aria-label="Product code row ${i + 1}"></td>
       <td><input data-k="batch_no" value="${r.batch_no || ''}" aria-label="Batch row ${i + 1}"></td>
       <td><select data-k="stage" aria-label="Stage row ${i + 1}"><option value="">—</option>${L.stages.map((st) => html`<option ${st === r.stage ? raw('selected') : ''}>${st}</option>`)}</select></td>
@@ -286,16 +288,15 @@ export async function receive(ctx) {
         title: 'Paste from spreadsheet',
         size: 'lg',
         submitLabel: 'Add rows',
-        body: html`<p class="span-2 muted">Copy rows from Excel or Google Sheets and paste below. Columns in this order: <strong>Description, Batch, Client reference, Quantity, Container</strong> (extra columns are ignored).</p>
+        body: html`<p class="span-2 muted">Copy rows from Excel or Google Sheets and paste below, heading row included. Without headings the columns are read in this order: <strong>Description, Batch, Client reference, Quantity, Container</strong>. Columns that fit none of ours are kept on each sample as the client's extra detail.</p>
           ${field({ name: 'text', type: 'textarea', rows: 10, span: 2, autofocus: true, placeholder: 'Metformin HCl 500 mg\tMF5-2701\tACME-REL-2701\t2 × 100 tablets\tHDPE bottle' })}`,
         onSubmit: (d) => d.text,
       });
       if (!text) return undefined;
       syncRowsFromDom();
-      const parsed = text.split(/\r?\n/).filter((l) => l.trim()).map((l) => {
-        const c = l.split('\t');
-        return { description: c[0]?.trim(), batch_no: c[1]?.trim(), client_ref: c[2]?.trim(), quantity: c[3]?.trim(), container: c[4]?.trim() };
-      });
+      const grid = gridFromText(text, 'paste');
+      // The receive table has no place for a pick-list problem, so an unknown stage arrives blank for the receiver to choose.
+      const parsed = readSheet(grid, guessMapping(grid, LAB_FIELDS)).rows.map(({ problems, details, ...r }) => (details.length ? { ...r, details } : r));
       rows = [...filledRows(), ...parsed];
       drawRows();
       toast(`${plural(parsed.length, 'row')} added`);
@@ -435,6 +436,7 @@ export async function detail(ctx) {
           actions: d.can.custody ? html`<button class="btn sm" data-act="custody">${icon('pin', { size: 13 })}Move</button>` : '',
           body: html`<ol class="timeline">${d.custody.map((c) => html`<li><span class="tl-dot"></span><div class="tl-body"><div><strong>${c.action}</strong>${c.location ? html` → ${c.location}` : ''}</div><div class="muted small">${c.full_name} · ${fmtDateTime(c.at)}</div>${c.note ? html`<div class="small">${c.note}</div>` : ''}</div></li>`)}</ol>`,
         })}
+        ${d.details.length ? card({ title: 'Client details', sub: 'From the client\'s sample sheet. Not printed on the CoA.', body: kv(d.details.map((x) => [x.label, x.value])) }) : ''}
         ${d.investigations.length ? card({ title: 'Investigations', flush: true, body: html`<ul class="list">${d.investigations.map((v) => html`<li class="link" data-href="/investigations/${v.id}"><div class="grow"><div class="title"><span class="code">${v.code}</span></div><div class="meta">${v.title}</div></div>${statusBadge(v.status)}</li>`)}</ul>` }) : ''}
         ${d.notebook.length ? card({ title: 'Notebook entries', flush: true, body: html`<ul class="list">${d.notebook.map((n) => html`<li class="link" data-href="/notebook/${n.id}"><div class="grow"><div class="title">${n.title}</div><div class="meta">${n.code} · ${n.author_name}</div></div>${statusBadge(n.status)}</li>`)}</ul>` }) : ''}
         ${d.signatures.length ? card({ title: 'Signatures', body: signatureList(d.signatures) }) : ''}

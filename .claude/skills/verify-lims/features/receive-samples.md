@@ -11,7 +11,7 @@ Log a delivery from a client: one form for the delivery, a row per sample (or pa
 - Sample rows `tbody[data-rows] tr`:
   - Inputs `input[data-k=description|batch_no|client_ref|quantity|container]`, aria-labels like "Description row 1" and "Batch row 1". Description is required for every non-empty row.
   - `[data-act=add]` "Add row", `[data-act=add5]`, `[data-act=fill]`, delete with `[data-del=<i>]`.
-  - `[data-act=paste]` "Paste from spreadsheet": a modal with `textarea[name=text]` and the button "Add rows".
+  - `[data-act=paste]` "Paste from spreadsheet": a modal with `textarea[name=text]` and the button "Add rows". It reads headings through `public/portal/sheet.js` with `LAB_FIELDS`; without headings the order is Description, Batch, Client reference, Quantity, Container. Unknown columns stay on the row as the client's extra detail (`input[type=hidden][data-k=details]`, shown as `.row-details` under the description).
 - Tests: checkboxes `input[name=method_ids]` in `label.method-opt`, filter `input[data-mfilter]`. Due date `input[name=due_date][data-due]`. Summary counters `[data-s=samples|methods|tests|codes]`.
 - Labels: "Print N label(s)" (`[data-act=labels]`) opens `/print/labels` in a new window. It is on the result screen after receiving, not on the form.
 

@@ -5,7 +5,7 @@
 import { html, raw, esc } from '/js/core/html.js';
 import { icon } from '/js/core/icons.js';
 import { snapshot, settle } from '/js/core/motion.js';
-import { parseSheet, planTests } from './sheet.js';
+import { FIELDS, PORTAL_FIELDS, gridFromText, guessMapping, remap, withHeader, readSheet, dropRows, planTests } from './sheet.js';
 
 // ---------------------------------------------------------------------------------------------
 // Small helpers
@@ -112,14 +112,13 @@ async function submitting(form, fn, busyText) {
 // API
 // ---------------------------------------------------------------------------------------------
 
-async function api(path, { method = 'GET', body } = {}) {
+async function api(path, { method = 'GET', body, file } = {}) {
+  const sent = file
+    ? { headers: { 'Content-Type': 'application/octet-stream', 'X-Filename': encodeURIComponent(file.name) }, body: file }
+    : body !== undefined ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { headers: {} };
   let res;
   try {
-    res = await fetch(`/api/portal${path}`, {
-      method, credentials: 'same-origin',
-      headers: { 'X-Requested-With': 'aliquot', ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    res = await fetch(`/api/portal${path}`, { method, credentials: 'same-origin', headers: { 'X-Requested-With': 'aliquot', ...sent.headers }, body: sent.body });
   } catch {
     throw new Error('We could not reach the laboratory server. Check your connection and try again.');
   }
@@ -633,8 +632,6 @@ const SAMPLE_FIELDS = ['description', 'product_code', 'batch_no', 'client_ref', 
 const MORE_FIELDS = SAMPLE_FIELDS.slice(1);
 const MORE_LABEL = 'Add code, lot, stage, urgency, quantity';
 const asShipment = (tier) => `As shipment (${tier})`;
-// The pasted columns the preview shows, in the client's sheet order.
-const PASTE_COLUMNS = [['product_code', 'Code'], ['description', 'Name'], ['batch_no', 'Lot'], ['stage', 'Stage'], ['priority', 'Urgency'], ['test', 'Test'], ['quantity', 'Qty']];
 
 /** One sample row. `v.problems` (from a paste) marks the cells the client still has to fix. */
 function sampleRow(v, lk, shipTier) {
@@ -651,22 +648,54 @@ function sampleRow(v, lk, shipTier) {
       ${pick('priority', 'Urgency', html`<option value="" class="js-as-ship">${asShipment(shipTier)}</option>`, lk.priorities)}
       ${more('quantity', 'Quantity, e.g. 100 tablets')}${more('client_ref', 'Your reference')}${more('container', 'Container')}
     </div>
+    ${v.details?.length ? html`<p class="srow-extra"><span class="micro">From your sheet</span> ${v.details.map((d, i) => html`${i ? ' · ' : ''}<b>${d.label}</b> ${d.value}`)}<input type="hidden" name="s.details" value="${JSON.stringify(v.details)}"></p>` : ''}
     <button class="linkish js-more" type="button">${open ? 'Hide details' : MORE_LABEL}</button>
   </li>`;
 }
 
+const USE_LABEL = { extra: 'Keep as extra detail', ignore: 'Ignore' };
+
+/** One line per column of the client's sheet: its heading, two of its values, and what we read it as. */
+function mapPanel(grid, mapping) {
+  const body = grid.slice(mapping.header ? 1 : 0);
+  return html`<div class="map">
+    <label class="map-header"><input type="checkbox" class="js-header" ${mapping.header ? raw('checked') : ''}> First row is column headings</label>
+    <div class="map-cols">${mapping.columns.map((c, i) => html`<label class="map-col ${c.use === 'ignore' ? 'is-ignored' : ''}">
+      <span class="map-head">${c.label}</span>
+      <span class="map-eg">${body.map((r) => r[i]).filter(Boolean).slice(0, 2).join(' · ') || 'empty'}</span>
+      <select class="select js-use" data-col="${i}" aria-label="${`What ${c.label} is`}">
+        ${PORTAL_FIELDS.map((k) => html`<option value="${k}" ${c.use === k ? raw('selected') : ''}>${FIELDS[k].label}</option>`)}
+        ${Object.entries(USE_LABEL).map(([k, l]) => html`<option value="${k}" ${c.use === k ? raw('selected') : ''}>${l}</option>`)}
+      </select></label>`)}</div>
+  </div>`;
+}
+
+/** A .csv is read here; an .xlsx is read by the server, which already reads workbooks for the notebook. */
+async function sheetsFromFile(file) {
+  const ext = file.name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+  // The server drops the connection on a body over its limit, which fetch reports as an unreachable server.
+  if (ext === 'xlsx' && file.size > 2 * 1024 * 1024) throw new Error('That workbook is larger than 2 MB. Save just the sample rows to a new file, or paste them.');
+  if (ext === 'xlsx') return (await api('/sheets', { method: 'POST', file })).sheets;
+  if (ext !== 'csv') throw new Error('Upload an .xlsx or .csv file. Save other spreadsheets as one of those first, or paste the rows.');
+  const bytes = await file.arrayBuffer();
+  let text;
+  // Excel on Windows saves "CSV" in the Windows-1252 code page unless told to use UTF-8.
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { text = new TextDecoder('windows-1252').decode(bytes); }
+  return [{ name: file.name, rows: gridFromText(text, 'csv'), truncated: false }];
+}
+
 /** The paste preview: every parsed row, problem cells highlighted with their message, and what the Test column means. */
-function pastePreview(sheet, plan, { fit }) {
-  if (!sheet.rows.length) return '';
-  const cols = PASTE_COLUMNS.filter(([k]) => sheet.rows.some((r) => r[k] || r.problems[k]));
-  const flagged = sheet.rows.filter((r) => Object.keys(r.problems).length).length;
+function pastePreview(rows, mapping, plan, { fit }) {
+  if (!rows.length) return '';
+  const cols = mapping.columns.map((c) => c.use).filter((use) => FIELDS[use]).map((k) => [k, FIELDS[k].label]);
+  const extra = rows.some((r) => r.details.length);
+  const flagged = rows.filter((r) => Object.keys(r.problems).length).length;
   return html`
-    <p class="paste-sum"><b>${plural(sheet.rows.length, 'sample')}</b> found${flagged ? html` · <span class="bad-text">${plural(flagged, 'row needs', 'rows need')} a look</span>` : plan.problem ? '' : ' · all look good'}${sheet.header ? '' : ' · no header row, read as your usual column order'}</p>
-    ${sheet.ignored.length ? html`<p class="small muted">Not read: ${sheet.ignored.join(', ')}.</p>` : ''}
+    <p class="paste-sum"><b>${plural(rows.length, 'sample')}</b> found${flagged ? html` · <span class="bad-text">${plural(flagged, 'row needs', 'rows need')} a look</span>` : plan.problem ? '' : ' · all look good'}${mapping.header ? '' : ' · no heading row, read as your usual column order'}</p>
     ${plan.problem ? html`<div class="alert alert-warn">${ic('alert', 16)}<span>${plan.problem}</span></div>` : ''}
-    ${sheet.rows.length > fit ? html`<div class="alert alert-warn">${ic('alert', 16)}<span>Only ${plural(fit, 'more sample fits', 'more samples fit')} in this submission (${MAX_SAMPLES} at most). The rest stay here to send next time.</span></div>` : ''}
-    <div class="table-wrap paste-table"><table class="table"><thead><tr><th>#</th>${cols.map(([, l]) => html`<th>${l}</th>`)}</tr></thead>
-      <tbody>${sheet.rows.map((r, i) => html`<tr><td class="muted">${i + 1}</td>${cols.map(([k]) => html`<td class="${r.problems[k] ? 'cell-bad' : ''}">${r[k] || (r.problems[k] ? '' : '—')}${r.problems[k] ? html`<div class="cell-why">${r.problems[k]}</div>` : ''}</td>`)}</tr>`)}</tbody>
+    ${rows.length > fit ? html`<div class="alert alert-warn">${ic('alert', 16)}<span>Only ${plural(fit, 'more sample fits', 'more samples fit')} in this submission (${MAX_SAMPLES} at most). The rest stay here to send next time.</span></div>` : ''}
+    <div class="table-wrap paste-table"><table class="table"><thead><tr><th>#</th>${cols.map(([, l]) => html`<th>${l}</th>`)}${extra ? html`<th>Extra detail</th>` : ''}</tr></thead>
+      <tbody>${rows.map((r, i) => html`<tr><td class="muted">${i + 1}</td>${cols.map(([k]) => html`<td class="${r.problems[k] ? 'cell-bad' : ''}">${r[k] || (r.problems[k] ? '' : '—')}${r.problems[k] ? html`<div class="cell-why">${r.problems[k]}</div>` : ''}</td>`)}${extra ? html`<td class="cell-extra">${r.details.map((d) => html`<div><b>${d.label}</b> ${d.value}</div>`)}</td>` : ''}</tr>`)}</tbody>
     </table></div>`;
 }
 
@@ -697,11 +726,14 @@ async function submitForm() {
           <ol class="srows js-rows">${sampleRow({}, lk, lk.defaultPriority)}</ol>
           <div class="row wrap">
             <button class="btn btn-sm js-add" type="button">${ic('plus', 15)} Add another sample</button>
-            <button class="linkish js-paste" type="button">Paste from a spreadsheet</button>
+            <button class="linkish js-paste" type="button">Paste or upload a spreadsheet</button>
           </div>
           <div class="paste" hidden>
             <label class="field"><span class="label">Paste rows from Excel or Google Sheets</span><textarea class="textarea js-paste-text" rows="4" placeholder="Copy the rows, header row included, and paste them here"></textarea></label>
-            <p class="slip-sub">We read Product Code, Product Name, Lot#, Status, Urgency, Test requested and Quantity, in any order. One sample name per line works too.</p>
+            <div class="row wrap paste-file"><label class="btn btn-sm">${ic('upload', 15)} Upload .xlsx or .csv<input class="js-file" type="file" accept=".xlsx,.csv" hidden></label><span class="small muted js-file-name"></span></div>
+            <p class="slip-sub">We match your columns to ours and show what we found below; change any that are wrong. Columns we have no place for are kept as extra detail for the lab. One sample name per line works too.</p>
+            <div class="js-sheet-pick"></div>
+            <div class="js-map"></div>
             <div class="js-preview" role="status"></div>
             <p class="help js-paste-note" role="status"></p>
             <div class="row wrap"><button class="btn btn-sm btn-primary js-paste-add" type="button" hidden></button><button class="btn btn-sm btn-quiet js-paste-close" type="button">Close</button></div>
@@ -734,7 +766,10 @@ async function submitForm() {
       const form = $('#submission', root);
       const rows = $('.js-rows', form);
       const allRows = () => $$('[data-row]', rows);
-      const readRow = (r) => Object.fromEntries(SAMPLE_FIELDS.map((k) => [k, $(`[name="s.${k}"]`, r).value.trim()]));
+      const readRow = (r) => {
+        const details = $('[name="s.details"]', r);
+        return { ...Object.fromEntries(SAMPLE_FIELDS.map((k) => [k, $(`[name="s.${k}"]`, r).value.trim()])), ...(details ? { details: JSON.parse(details.value) } : {}) };
+      };
       const update = () => {
         const list = allRows();
         list.forEach((r, i) => { $('.n', r).textContent = i + 1; $('.remove', r).hidden = list.length === 1; });
@@ -766,14 +801,29 @@ async function submitForm() {
       });
       const box = $('.js-paste-text', form);
       const blankRows = () => allRows().filter((r) => !Object.values(readRow(r)).some(Boolean));
-      let pasted = { sheet: { rows: [] }, plan: {} };
+      let sheet = null; // { grid, mapping, rows, plan }: the pasted or uploaded rows not yet added
+      let book = []; // the uploaded file's sheets, when a workbook has several
+      const load = (grid) => {
+        sheet = grid.length ? { grid, mapping: guessMapping(grid, PORTAL_FIELDS) } : null;
+        preview();
+      };
+      const loadBook = (sheets, pick = 0) => {
+        book = sheets;
+        $('.js-sheet-pick', form).innerHTML = sheets.length > 1 ? String(html`<label class="field"><span class="label">Sheet</span><select class="select js-sheet">${sheets.map((x, i) => html`<option value="${i}" ${i === pick ? raw('selected') : ''}>${x.name}</option>`)}</select></label>`) : '';
+        load(sheets[pick]?.rows ?? []);
+        if (sheets[pick]?.truncated) $('.js-paste-note', form).textContent = 'This sheet is longer than we read in one go: only its first 400 rows and 40 columns are shown.';
+      };
       const preview = () => {
-        const sheet = parseSheet(box.value);
-        pasted = { sheet, plan: planTests(sheet.rows, lk.methods) };
+        if (sheet) {
+          sheet.rows = readSheet(sheet.grid, sheet.mapping).rows;
+          sheet.plan = planTests(sheet.rows, lk.methods);
+        }
+        const rows = sheet?.rows ?? [];
         const fit = MAX_SAMPLES - allRows().length + blankRows().length;
-        $('.js-preview', form).innerHTML = String(pastePreview(sheet, pasted.plan, { fit }));
+        $('.js-map', form).innerHTML = sheet ? String(mapPanel(sheet.grid, sheet.mapping)) : '';
+        $('.js-preview', form).innerHTML = sheet ? String(pastePreview(rows, sheet.mapping, sheet.plan, { fit })) : '';
         const add = $('.js-paste-add', form);
-        const n = Math.min(sheet.rows.length, fit);
+        const n = Math.min(rows.length, fit);
         add.hidden = n === 0;
         add.textContent = `Add ${plural(n, 'sample')}`;
         $('.js-paste-note', form).textContent = '';
@@ -781,30 +831,50 @@ async function submitForm() {
       const openPaste = () => { $('.paste', form).hidden = false; box.focus(); };
       $('.js-paste', form).addEventListener('click', openPaste);
       $('.js-paste-close', form).addEventListener('click', () => { $('.paste', form).hidden = true; });
-      box.addEventListener('input', preview);
-      // Pasting several cells into a name box goes through the same preview instead of landing as one long name.
+      box.addEventListener('input', () => { book = []; $('.js-sheet-pick', form).innerHTML = ''; $('.js-file-name', form).textContent = ''; load(gridFromText(box.value, 'paste')); });
+      $('.js-file', form).addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        e.target.value = '';
+        if (!file) return;
+        box.value = '';
+        $('.js-file-name', form).textContent = file.name;
+        try {
+          loadBook(await sheetsFromFile(file));
+        } catch (err) {
+          if (err.handled) return;
+          loadBook([]);
+          $('.js-paste-note', form).textContent = err.message;
+        }
+      });
+      $('.js-sheet-pick', form).addEventListener('change', (e) => loadBook(book, Number(e.target.value)));
+      $('.js-map', form).addEventListener('change', (e) => {
+        if (e.target.matches('.js-use')) sheet.mapping = remap(sheet.mapping, Number(e.target.dataset.col), e.target.value);
+        if (e.target.matches('.js-header')) sheet.mapping = withHeader(sheet.grid, sheet.mapping, e.target.checked);
+        preview();
+      });
+      // Excel puts tabs between the cells of a multi-cell copy; dropped into one name box they would make one long name.
       rows.addEventListener('paste', (e) => {
         const text = e.clipboardData?.getData('text/plain') || '';
         if (!e.target.matches('[name="s.description"]') || !text.includes('\t')) return;
         e.preventDefault();
         box.value = text;
         openPaste();
-        preview();
+        load(gridFromText(text, 'paste'));
         $('.paste', form).scrollIntoView({ block: 'nearest' });
       });
       $('.js-paste-add', form).addEventListener('click', () => {
         blankRows().forEach((r) => r.remove());
         const fit = MAX_SAMPLES - allRows().length;
-        const { sheet, plan } = pasted;
-        addRows(sheet.rows.slice(0, fit).map(({ test, ...r }) => r));
+        const { rows: taken, plan, grid, mapping } = sheet;
+        addRows(taken.slice(0, fit).map(({ test, ...r }) => r));
         if (!allRows().length) addRows([{}]);
-        for (const id of plan.methodIds || []) {
+        for (const id of plan.methodIds) {
           const chip = $(`[name=method_ids][value="${id}"]`, form);
           if (chip) chip.checked = true;
         }
-        const left = sheet.rows.length - fit;
-        const lines = box.value.replace(/\r\n?/g, '\n').split('\n').filter((l) => l.trim());
-        box.value = left > 0 ? [...(sheet.header ? lines.slice(0, 1) : []), ...lines.slice(-left)].join('\n') : '';
+        const left = taken.length - fit;
+        box.value = '';
+        sheet = left > 0 ? { grid: dropRows(grid, mapping, fit), mapping } : null;
         preview();
         $('.js-paste-note', form).textContent = left > 0 ? `Only ${MAX_SAMPLES} samples fit in one submission. ${plural(left, 'row was', 'rows were')} not added.` : '';
         $('.paste', form).hidden = left <= 0;

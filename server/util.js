@@ -18,7 +18,7 @@ export function addDays(date, n) {
   return localDate(d);
 }
 
-/** Adds working days (Mon–Fri); turnaround times are quoted in working days. */
+/** Adds working days (Mon–Fri); turnaround times are quoted in working days. Zero days from a weekend is Monday. */
 export function addBusinessDays(date, n) {
   const d = new Date(`${String(date).slice(0, 10)}T12:00:00`);
   let left = n;
@@ -26,6 +26,7 @@ export function addBusinessDays(date, n) {
     d.setDate(d.getDate() + 1);
     if (d.getDay() !== 0 && d.getDay() !== 6) left--;
   }
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
   return localDate(d);
 }
 
