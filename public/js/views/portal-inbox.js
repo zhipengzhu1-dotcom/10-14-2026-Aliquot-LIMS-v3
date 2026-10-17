@@ -209,8 +209,8 @@ export async function submission(ctx) {
         ${card({
           title: `Samples (${s.samples.length})`,
           flush: true,
-          body: html`<div class="table-wrap"><table class="table compact"><thead><tr><th>#</th><th>Description</th><th>Product code</th><th>Batch / lot</th><th>Stage</th><th>Turnaround</th><th>Quantity</th><th>Client ref.</th><th>Container</th></tr></thead>
-            <tbody>${s.samples.map((r, i) => html`<tr><td class="muted">${i + 1}</td><td>${r.description}</td><td>${r.product_code || '—'}</td><td>${r.batch_no || '—'}</td><td>${r.stage || '—'}</td><td>${r.priority ? priorityBadge(r.priority) || r.priority : html`<span class="muted">As shipment</span>`}</td><td>${r.quantity || '—'}</td><td>${r.client_ref || '—'}</td><td>${r.container || '—'}</td></tr>`)}</tbody></table></div>`,
+          body: html`<div class="table-wrap"><table class="table compact"><thead><tr><th>#</th><th>Description</th><th>Product code</th><th>Batch / lot</th><th>Stage</th><th>Turnaround</th><th>Quantity</th><th>Client ref.</th><th>Container</th>${s.samples.some((r) => r.details?.length) ? html`<th>Client's extra detail</th>` : ''}</tr></thead>
+            <tbody>${s.samples.map((r, i) => html`<tr><td class="muted">${i + 1}</td><td>${r.description}</td><td>${r.product_code || '—'}</td><td>${r.batch_no || '—'}</td><td>${r.stage || '—'}</td><td>${r.priority ? priorityBadge(r.priority) || r.priority : html`<span class="muted">As shipment</span>`}</td><td>${r.quantity || '—'}</td><td>${r.client_ref || '—'}</td><td>${r.container || '—'}</td>${s.samples.some((x) => x.details?.length) ? html`<td>${(r.details ?? []).map((x) => html`<div><span class="muted">${x.label}:</span> ${x.value}</div>`)}</td>` : ''}</tr>`)}</tbody></table></div>`,
         })}
         ${thread ? card({
           title: 'Conversation',
