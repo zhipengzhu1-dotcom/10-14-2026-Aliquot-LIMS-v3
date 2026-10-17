@@ -673,6 +673,8 @@ function mapPanel(grid, mapping) {
 /** A .csv is read here; an .xlsx is read by the server, which already reads workbooks for the notebook. */
 async function sheetsFromFile(file) {
   const ext = file.name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+  // The server drops the connection on a body over its limit, which fetch reports as an unreachable server.
+  if (ext === 'xlsx' && file.size > 2 * 1024 * 1024) throw new Error('That workbook is larger than 2 MB. Save just the sample rows to a new file, or paste them.');
   if (ext === 'xlsx') return (await api('/sheets', { method: 'POST', file })).sheets;
   if (ext !== 'csv') throw new Error('Upload an .xlsx or .csv file. Save other spreadsheets as one of those first, or paste the rows.');
   const bytes = await file.arrayBuffer();

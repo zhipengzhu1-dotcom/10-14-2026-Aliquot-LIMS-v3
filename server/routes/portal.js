@@ -321,7 +321,7 @@ function readWorkbook(buf, filename) {
     if (e instanceof HttpError && /^This is not a valid/.test(e.message)) throw bad('This is not a valid Excel file. Save it from Excel as .xlsx and try again.');
     throw e;
   }
-  const sheets = book.sheets.map(({ name, rows, truncated }) => ({ name, rows: rows.filter((r) => r.some(Boolean)), truncated })).filter((sh) => sh.rows.length);
+  const sheets = book.sheets.map(({ name, rows, truncated }) => ({ name, rows: rows.map((r) => r.map((c) => c.trim())).filter((r) => r.some(Boolean)), truncated })).filter((sh) => sh.rows.length);
   if (!sheets.length) throw bad('That workbook has no rows to read');
   return { sheets };
 }

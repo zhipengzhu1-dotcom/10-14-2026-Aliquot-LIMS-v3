@@ -430,7 +430,7 @@ const upload = (client, filename, buf) => fetch(`${BASE}/api/portal/sheets`, {
 test('a client’s .xlsx sample sheet comes back as one grid per sheet with rows, and nothing else is accepted', async () => {
   const laura = await portal(LAURA);
   const book = makeXlsx({ sheets: [
-    { name: 'Samples', rows: [['Product Name', 'Lot#', 'Storage'], ['Aspirin', 'L1', '2-8 °C'], ['', '', ''], ['Paracetamol', 'L2', '']] },
+    { name: 'Samples', rows: [['Product Name', 'Lot#', 'Storage'], [' Aspirin ', 'L1', '2-8 °C'], ['', ' ', ''], ['Paracetamol', 'L2', '']] },
     { name: 'Notes', rows: [] },
   ] });
   assert.deepEqual(await upload(laura, 'samples.xlsx', book), [200, {
