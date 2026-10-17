@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { startServer } from './server.js';
+import { makeXlsx, zip } from '../server/ooxml.js';
 
 let BASE;
 const PASSWORD = 'demo1234';
@@ -418,4 +419,29 @@ test('portal actions are written to the audit trail under the contact’s identi
   const list = await qa.ok('GET', '/api/audit?entity=portal_submissions&limit=2000');
   assert.ok(list.some((r) => r.username === who && r.action === 'CREATE'), 'submissions are audited');
   assert.ok(list.some((r) => r.username === 'nadia.rossi' && r.action === 'STATUS'), 'staff receipt is audited');
+});
+
+const upload = (client, filename, buf) => fetch(`${BASE}/api/portal/sheets`, {
+  method: 'POST',
+  headers: { 'X-Requested-With': 'aliquot', 'X-Filename': filename, 'Content-Type': 'application/octet-stream', ...(client?.cookie ? { Cookie: client.cookie } : {}) },
+  body: buf,
+}).then(async (r) => [r.status, await r.json()]);
+
+test('a client’s .xlsx sample sheet comes back as one grid per sheet with rows, and nothing else is accepted', async () => {
+  const laura = await portal(LAURA);
+  const book = makeXlsx({ sheets: [
+    { name: 'Samples', rows: [['Product Name', 'Lot#', 'Storage'], ['Aspirin', 'L1', '2-8 °C'], ['', '', ''], ['Paracetamol', 'L2', '']] },
+    { name: 'Notes', rows: [] },
+  ] });
+  assert.deepEqual(await upload(laura, 'samples.xlsx', book), [200, {
+    sheets: [{ name: 'Samples', rows: [['Product Name', 'Lot#', 'Storage'], ['Aspirin', 'L1', '2-8 °C'], ['Paracetamol', 'L2', '']], truncated: false }],
+  }]);
+
+  assert.equal((await upload(null, 'samples.xlsx', book))[0], 401);
+  assert.equal((await upload(manager, 'samples.xlsx', book))[0], 401, 'a staff session is not a portal session');
+  assert.deepEqual(await upload(laura, 'samples.pdf', book), [400, { error: 'Upload an .xlsx or .csv file. Save other spreadsheets as one of those first, or paste the rows.' }]);
+  assert.deepEqual(await upload(laura, 'samples.xlsx', Buffer.from('Product Name,Lot\nAspirin,L1')), [400, { error: 'This is not a valid Excel file. Save it from Excel as .xlsx and try again.' }]);
+  const macro = zip([['[Content_Types].xml', '<Types/>'], ['xl/workbook.xml', '<workbook/>'], ['xl/vbaProject.bin', 'x']]);
+  assert.deepEqual(await upload(laura, 'samples.xlsx', macro), [400, { error: 'Files containing macros are not accepted' }]);
+  assert.deepEqual(await upload(laura, 'empty.xlsx', makeXlsx({ sheets: [{ name: 'Sheet1', rows: [] }] })), [400, { error: 'That workbook has no rows to read' }]);
 });

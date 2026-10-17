@@ -17,6 +17,7 @@ import { SAMPLE_TYPES, STORAGE_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, D
 import { clean, nowIso, idList, addDays, today, specText, fixed } from '../util.js';
 import { receiveSamples, cleanSampleRows } from './lab.js';
 import { createProject } from './business.js';
+import { previewXlsx } from '../ooxml.js';
 
 export const SUBMISSION_STATUSES = ['Submitted', 'Acknowledged', 'Received', 'Declined', 'Withdrawn'];
 export const SUBMISSION_OPEN = ['Submitted', 'Acknowledged'];
@@ -310,6 +311,21 @@ export function receiveSubmission(ctx, id, input = {}) {
   });
 }
 
+/** A client's workbook as grids, one per visible sheet that has rows, for the sample sheet mapping. Nothing is stored. */
+function readWorkbook(buf, filename) {
+  if (!/\.xlsx$/i.test(String(filename ?? ''))) throw bad('Upload an .xlsx or .csv file. Save other spreadsheets as one of those first, or paste the rows.');
+  let book;
+  try {
+    book = previewXlsx(buf);
+  } catch (e) {
+    if (e instanceof HttpError && /^This is not a valid/.test(e.message)) throw bad('This is not a valid Excel file. Save it from Excel as .xlsx and try again.');
+    throw e;
+  }
+  const sheets = book.sheets.map(({ name, rows, truncated }) => ({ name, rows: rows.filter((r) => r.some(Boolean)), truncated })).filter((sh) => sh.rows.length);
+  if (!sheets.length) throw bad('That workbook has no rows to read');
+  return { sheets };
+}
+
 const NEEDS_RESPONSE = { reply: 'Nothing to update', propose: 'Summarise the proposal for the client', decline: 'Give the client a reason' };
 
 export function respondToRequest(ctx, id, input) {
@@ -483,6 +499,12 @@ export default function routes(r) {
     const thread = get('SELECT id FROM portal_threads WHERE submission_id = ? AND client_id = ?', sub.id, pu.client_id);
     return { submission: submissionView(sub, { forClient: true }), thread_id: thread?.id ?? null, can: flags(CLIENT_SUBMISSION_RULES, sub, pu) };
   }, open);
+
+  // The body is buffered before portalAuth runs, so the limit stays at the JSON routes' 2 MB.
+  r.post('/api/portal/sheets', (ctx) => {
+    portalAuth(ctx);
+    return readWorkbook(ctx.rawBody, ctx.req.headers['x-filename']);
+  }, { auth: false, raw: true, limit: 2 * 1024 * 1024 });
 
   r.post('/api/portal/submissions', (ctx) => submitSamples(portalCtx(ctx, portalAuth(ctx)), ctx.portal, ctx.body), open);
 
