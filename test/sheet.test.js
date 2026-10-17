@@ -68,6 +68,21 @@ test('headings in any order, some missing, an unknown one kept as extra detail',
   });
 });
 
+test('a client’s own sheet where most headings are theirs, not ours, is still read by its headings', () => {
+  const { mapping, rows } = read([
+    'Product Code\tPRODUCT NAME\tTYPE\tLOT#\tCLIENT\tEXP DATE\tTESTING\tPO NUMBER',
+    '0836J\tDiphenhydramine 50mg Capsule\tInitial\tR635939\tCPC\t2027-01\tTBD\tPO-77',
+  ].join('\n'));
+  assert.deepEqual(mapping, { header: true, columns: [
+    { label: 'Product Code', use: 'product_code' }, { label: 'PRODUCT NAME', use: 'description' }, { label: 'TYPE', use: 'extra' }, { label: 'LOT#', use: 'batch_no' },
+    { label: 'CLIENT', use: 'extra' }, { label: 'EXP DATE', use: 'extra' }, { label: 'TESTING', use: 'extra' }, { label: 'PO NUMBER', use: 'extra' },
+  ] });
+  assert.deepEqual(rows, [{
+    problems: {}, product_code: '0836J', description: 'Diphenhydramine 50mg Capsule', batch_no: 'R635939',
+    details: [{ label: 'TYPE', value: 'Initial' }, { label: 'CLIENT', value: 'CPC' }, { label: 'EXP DATE', value: '2027-01' }, { label: 'TESTING', value: 'TBD' }, { label: 'PO NUMBER', value: 'PO-77' }],
+  }]);
+});
+
 test('a heading repeated, a blank heading and an empty column', () => {
   const { mapping, rows } = read('Name\tName\t\t\tLot\nAspirin\tAcetylsalicylic acid\tshelf 2\t\tL1');
   assert.deepEqual(mapping.columns, [
