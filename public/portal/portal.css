@@ -698,12 +698,19 @@ form.card { counter-reset: step; }
 .as-sample-head .t { flex: 1; min-width: 0; font-weight: 700; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .as-sample .as-grid { padding: 10px 12px 12px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 .as-sample .srow-extra { padding: 0 12px 10px; }
+/* Positioned, so the visually hidden header label scrolls inside the box instead of widening the page. */
+.as-tbl { position: relative; }
 .as-tbl .table { font-size: 13px; }
 .as-tbl .table th, .as-tbl .table td { padding: 6px; vertical-align: top; }
 .as-tbl td.as-f { display: table-cell; }
 .as-tbl .input, .as-tbl .select { min-height: 36px; padding: 6px 8px; font-size: 13px; min-width: 110px; }
 .as-tbl .select { padding-right: 28px; background-position: right 8px center; }
 .as-tbl td[data-field$=".description"] .input { min-width: 170px; }
+.as-tbl .table :is(th, td):nth-child(-n+2) { position: sticky; z-index: 1; background: var(--surface); }
+.as-tbl .table th:nth-child(-n+2) { z-index: 2; background: var(--surface-2); }
+.as-tbl .table :is(th, td):first-child { left: 0; width: 34px; min-width: 34px; max-width: 34px; padding-left: 8px; }
+.as-tbl .table :is(th, td):nth-child(2) { left: 34px; box-shadow: 1px 0 0 var(--line-strong); }
+.as-tbl .table tbody tr:hover td:nth-child(-n+2) { background: var(--surface-2); }
 .as-paste[hidden] { display: none; }
 .as-send { flex-wrap: wrap; }
 .as-send .count { min-width: 0; }

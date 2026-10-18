@@ -697,7 +697,9 @@ const ROW_FIELDS = [
   ['description', 'Sample name', 'text'], ['batch_no', 'Batch / lot', 'text'], ['product_code', 'Product code', 'text'], ['stage', 'Stage', 'stages'],
   ['priority', 'Turnaround', 'tiers'], ['quantity', 'Quantity', 'text'], ['client_ref', 'Your reference', 'text'], ['container', 'Container', 'text'],
 ];
-const TABLE_MIN = 640;
+// The table leads with the batch, which stays in view while the other columns scroll sideways inside the table.
+const TABLE_FIELDS = ['batch_no', 'description', 'stage', 'priority', 'quantity', 'product_code', 'client_ref', 'container'].map((k) => ROW_FIELDS.find(([f]) => f === k));
+const TABLE_MIN = 560;
 const GREETING = 'Paste the shipping email or packing list, or attach your spreadsheet. I fill in the submission and mark what I checked and what I guessed. Nothing goes to the lab until you press Send to lab.';
 
 const blankRow = () => ({ description: null, product_code: null, batch_no: null, client_ref: null, quantity: null, container: null, stage: null, priority: null, details: [] });
@@ -784,23 +786,23 @@ const fieldBox = (path, label, kind) => html`<div class="as-f ${provClass(path)}
 const details = (row) => (row.details?.length ? html`<p class="srow-extra"><span class="micro">Extra detail</span> ${row.details.map((d, i) => html`${i ? ' · ' : ''}<b>${d.label}</b> ${d.value}`)}</p>` : '');
 
 function samplesTable(d) {
-  return html`<div class="table-wrap as-tbl"><table class="table"><thead><tr><th>#</th>${ROW_FIELDS.map(([, l]) => html`<th>${l}</th>`)}<th><span class="sr-only">Remove</span></th></tr></thead>
+  return html`<div class="table-wrap as-tbl"><table class="table"><thead><tr><th>#</th>${TABLE_FIELDS.map(([, l]) => html`<th>${l}</th>`)}<th><span class="sr-only">Remove</span></th></tr></thead>
     <tbody>${d.samples.map((row, i) => html`<tr>
       <td class="muted">${i + 1}</td>
-      ${ROW_FIELDS.map(([k, l, kind]) => {
+      ${TABLE_FIELDS.map(([k, l, kind]) => {
         const path = `samples.${i}.${k}`;
         const p = d.provenance[path];
         const problem = problemAt(path);
         return html`<td class="as-f ${provClass(path)}" data-field="${path}" title="${problem?.message ?? (p ? `${SOURCES[p.source].tag}: ${p.reason || SOURCES[p.source].help}` : '')}">${control(path, kind, `${l}, sample ${i + 1}`)}${k === 'description' ? details(row) : ''}</td>`;
       })}
-      <td><button class="btn btn-quiet btn-sm" type="button" data-remove="${i}" aria-label="${`Remove sample ${i + 1}`}">${ic('x', 15)}</button></td>
+      <td><button class="btn btn-quiet btn-sm" type="button" data-remove="${i}" aria-label="${`Remove sample ${i + 1}`}" ${desk.busy ? raw('disabled') : ''}>${ic('x', 15)}</button></td>
     </tr>`)}</tbody></table></div>`;
 }
 
 function samplesCards(d) {
   return html`<ol class="as-samples">${d.samples.map((row, i) => html`<li class="as-sample">
     <div class="as-sample-head"><span class="as-idx">${i + 1}</span><span class="t">${[row.description, row.batch_no].filter(Boolean).join(' · ') || 'New sample'}</span>
-      <button class="btn btn-quiet btn-sm" type="button" data-remove="${i}" aria-label="${`Remove sample ${i + 1}`}">Remove</button></div>
+      <button class="btn btn-quiet btn-sm" type="button" data-remove="${i}" aria-label="${`Remove sample ${i + 1}`}" ${desk.busy ? raw('disabled') : ''}>Remove</button></div>
     <div class="as-grid">${ROW_FIELDS.map(([k, l, kind]) => fieldBox(`samples.${i}.${k}`, l, kind))}</div>${details(row)}</li>`)}</ol>`;
 }
 
@@ -825,6 +827,7 @@ function blockers() {
     ...desk.gate.problems.map((p) => (p.fix ? `${labelOf(p.path).toLowerCase()}: take the suggested value` : p.message)),
     ...MUST_CONFIRM.filter((p) => desk.draft.provenance[p]?.source === 'guessed').map((p) => `confirm ${labelOf(p).toLowerCase()} (${shown(p)})`),
     ...(desk.checking ? ['checking your changes'] : []),
+    ...(desk.busy ? ['the assistant is still drafting'] : []),
   ];
 }
 
@@ -858,7 +861,7 @@ function formHtml() {
       <div class="chips">${lk.methods.map((m) => html`<label class="chip" title="${`${m.code} · ${m.technique}`}"><input type="checkbox" data-method="${m.id}" ${d.method_ids.includes(m.id) ? raw('checked') : ''}><span>${m.title}</span></label>`)}</div></div>
     <div class="slip-sec"><h2><span class="step-n">03</span>Samples <span class="micro faint">${d.samples.length} of ${MAX_SAMPLES} max</span></h2>
       ${desk.table ? samplesTable(d) : samplesCards(d)}
-      <div class="row wrap" style="margin-top:10px"><button class="btn btn-sm" type="button" data-add ${d.samples.length >= MAX_SAMPLES ? raw('disabled') : ''}>${ic('plus', 15)} Add a sample</button>
+      <div class="row wrap" style="margin-top:10px"><button class="btn btn-sm" type="button" data-add ${d.samples.length >= MAX_SAMPLES || desk.busy ? raw('disabled') : ''}>${ic('plus', 15)} Add a sample</button>
         <button class="linkish js-paste" type="button">Add from a spreadsheet</button></div></div>
     <div class="as-legend"><span class="micro">Key</span>${Object.entries(SOURCES).map(([k, s]) => html`<span class="ptag ${k}" title="${s.help}">${s.tag}</span>`)}<span class="ptag ask">needs you</span></div>
   </section>`;
@@ -976,9 +979,15 @@ function mountDesk(root) {
     renderTabs();
   };
   const renderDraft = () => {
+    const focused = draftCol.contains(document.activeElement) ? document.activeElement.id : '';
     desk.table = draftCol.clientWidth >= TABLE_MIN;
     $in('.js-form').innerHTML = String(formHtml());
     renderChecks();
+    const el = focused && document.getElementById(focused);
+    if (el) {
+      el.focus();
+      if (el.setSelectionRange && el.type === 'text') el.setSelectionRange(el.value.length, el.value.length);
+    }
   };
   // Every change runs the same checks the lab runs on a submission, without saving anything.
   const check = () => {
@@ -1001,7 +1010,21 @@ function mountDesk(root) {
     else renderChecks();
     check();
   };
-  const mark = (path, source, reason) => { desk.draft.provenance[path] = { source, ...(reason ? { reason } : {}) }; };
+  const mark = (path, source, reason) => {
+    desk.draft.provenance[path] = { source, ...(reason ? { reason } : {}) };
+    desk.touched?.add(path);
+  };
+  // The draft stays editable while the assistant drafts, with its rows fixed. What the client changed in that time keeps
+  // the client's value and provenance over the reply's.
+  const keepTouched = (reply) => {
+    for (const path of desk.touched) {
+      const row = /^samples\.(\d+)\./.exec(path)?.[1];
+      while (row != null && reply.samples.length <= Number(row)) reply.samples.push(blankRow());
+      setAt(reply, path, structuredClone(getAt(desk.draft, path)));
+      reply.provenance[path] = desk.draft.provenance[path];
+    }
+    return reply;
+  };
 
   renderChat();
   renderDraft();
@@ -1018,25 +1041,29 @@ function mountDesk(root) {
     const before = history();
     desk.messages.push({ role: 'client', text });
     desk.busy = true;
+    desk.touched = new Set();
     renderChat();
+    renderDraft();
     try {
       const res = await post('/assistant', { message: text, draft: desk.draft, history: before, ...desk.choice });
-      desk.draft = res.draft;
-      desk.gate = res.gate;
+      const editedMeanwhile = desk.touched.size > 0;
+      desk.draft = keepTouched(res.draft);
+      desk.gate = editedMeanwhile ? null : res.gate;
       desk.messages.push({
         role: 'assistant', text: res.reply, questions: res.draft.questions, attempts: res.attempts, unresolved: res.unresolved,
         meta: `${res.model_label} · ${res.effort} effort · ${(res.ms / 1000).toFixed(1)} s${res.attempts > 1 ? ` · ${res.attempts} tries` : ''}`,
       });
-      renderDraft();
       check();
     } catch (e) {
       if (e.handled) return;
       desk.messages.push({ role: 'note', text: `${e.message} You can keep filling in the submission by hand.` });
     } finally {
       desk.busy = false;
+      desk.touched = null;
       if (root.isConnected) {
         renderChat();
-        $in('#as-message')?.focus();
+        renderDraft();
+        if (!draftCol.contains(document.activeElement)) $in('#as-message')?.focus();
       }
     }
   }
@@ -1210,6 +1237,10 @@ function mountDesk(root) {
     preview();
   });
   $('.js-paste-add', panel).addEventListener('click', () => {
+    if (desk.busy) {
+      $('.js-paste-note', panel).textContent = 'The assistant is drafting. Add these rows once it replies.';
+      return;
+    }
     const d = desk.draft;
     const kept = d.samples.filter((r) => !blank(r));
     const fit = MAX_SAMPLES - kept.length;
