@@ -4,23 +4,23 @@ An out-of-specification result opens an investigation automatically when the ana
 
 ## Sub-features
 
-- **Auto-raise on submit:** a failing numeric result (or a text result marked Does not conform) submitted from `/tests/:id` opens an OOS investigation of severity Major and shows the toast "Submitted. OOS investigation <code> opened". The test's `investigations[]` becomes non-empty and `approve-ok` on the test is disabled while it is open.
-- **Raise by hand:** `/investigations` → `button[data-act=new]` "Raise investigation" (needs `investigations.raise`: analyst, scientist, manager, QA). Form fields `select[name=type]`, `input[name=title]`, `select[name=severity]`, `textarea[name=description]`; optional test/sample/project/instrument links.
+- **Auto-raise on submit:** a failing numeric result (or a text result marked "Does not", radio value `Fail`) submitted from `/tests/:id` opens an OOS investigation of severity Major and shows the toast "Submitted. OOS investigation <code> opened". It is raised only when the test has no open investigation yet (`submitTest` in `server/workflow.js`). The test's `investigations[]` becomes non-empty. On the now Submitted test `approve-ok` is absent; once the test is Reviewed, the approver sees it disabled while the investigation is open.
+- **Raise by hand:** `/investigations` → `button[data-act=new]` "Raise investigation" (needs `investigations.raise`: analyst, scientist, manager, QA). Form fields `select[name=type]` (default Deviation, or OOS when raised from a test), `select[name=severity]` (default Minor), `input[name=title]`, `textarea[name=description]`, `select[name=owner_id]` ("Lab manager decides" when empty), `input[name=due_date]` and `select[name=instrument_id]`. The test, sample and project links are hidden inputs prefilled by the page the form was opened from (`newInvestigation(prefill)` in `investigations.js`); from `/investigations` they are empty. Modal button "Raise".
 - **Record the investigation:** on `/investigations/:id`, the `form[data-inv]` has `textarea[name=root_cause]`, `textarea[name=impact]`, `textarea[name=capa]`, `select[name=conclusion]`, `select[name=status]` (stage, never Closed), `select[name=owner_id]`, `input[name=due_date]`, `select[name=severity]`, then `form[data-inv] button[type=submit]` "Save" (PUT `/api/investigations/:id`). Toast "Investigation saved". Anyone with raise or close rights may edit while it is open; a Closed investigation is locked (400 "Closed investigations are locked"). After closing, `form[data-inv]` stays in the page as a read-only container (no inputs, no Save), so its presence does not mean the investigation is editable.
 - **Close:** `[data-act=close]` "Close investigation" is shown from `can.close` (needs `investigations.close`: QA and manager; the person who performed the test under investigation is refused). The button first checks root cause and conclusion are filled, saves the form, then opens the e-sign modal (meaning `investigation.close.oos`, confirm "Sign & close", optional closure comment) and POSTs `/api/investigations/:id/close`. Toast "Investigation closed".
-- **From the test page:** `/tests/:id` has `[data-act=investigate]` "Raise investigation", and its Investigations card has `[data-act=close-investigation]` "Close" for an open one. That close modal requires `textarea[name=root_cause]` and `textarea[name=conclusion]`, which go in the close POST body.
+- **From the test page:** `/tests/:id` has `[data-act=investigate]` "Raise investigation" inside the More actions dropdown (`button[data-dd][aria-label="More actions"]`, then `.dropdown-menu button[data-act=investigate]`), and its Investigations card has `[data-act=close-investigation]` "Close" for an open one. That close modal requires `textarea[name=root_cause]` and `textarea[name=conclusion]` (free text here, not the select of the investigation page; no separate comment field), which go in the close POST body.
 - **Results table:** when linked to a test, the page shows that test's results with the failing row in `tr.row-fail`.
 
 ## How to get to it (user POV)
 
 - Sign in as `daniel.okafor` → **Investigations** in the sidebar (`/investigations`, filter chips by status; the sidebar badge counts open ones) → click the reference `a.code[href="/investigations/<id>"]`.
-- From the test page: the open investigation is linked in the test's investigation notice and in the Investigations card.
-- From a sample page: the "open OOS investigation" link.
+- From the test page: the open investigation is linked in the Investigations card. The red notice "Investigation <code> is open — this result cannot be approved until it is closed." with its link shows only to the approver of a Reviewed test (`can.return` and not `can.accept`).
+- From a sample page: the out-of-specification notice links each open investigation by its code ("Investigation OOS-… is open."), and the Investigations card lists it as `li.link[data-href="/investigations/<id>"]`.
 - Search with ⌘K for the OOS code.
 
 ## Driving it with agent-browser
 
-Find an open OOS first. The demo seed ships at least one; otherwise submit a failing result as Tom ([test-results.md](test-results.md)) to create one.
+Find an open OOS first. The demo seed ships at least one; otherwise submit a failing result as Tom ([test-results.md](test-results.md)) to create one. Never insert a row to make one: a missing precondition is reported, not worked around.
 
 ```bash
 .claude/skills/verify-lims/scripts/api.mjs verify daniel.okafor GET '/api/investigations'       # or ?status=open, which returns every investigation that is not Closed, including "Under Investigation"
@@ -59,8 +59,7 @@ End state that proves it:
 
 ## Gotchas
 
-- Clicking "Close investigation" with an empty root cause or no conclusion shows the toast "Record the root cause and a conclusion, then save, before closing" and does nothing else. Fill and save first.
-- The Conclusion options differ by type: OOS uses `lookups.oosConclusions`; other types offer "No impact", "Impact — see CAPA", "Not applicable". Read the `<option>` texts with `agent-browser eval` before `select`ing.
-- The Stage select deliberately omits Closed. Closing only happens through the signed button.
-- The page shows an "OOS procedure" card (Phase I / Phase II) only while the investigation is open and of type OOS; its disappearance is part of the closed end state.
-- If the seed has no open OOS, the journey must create one through a failing submit, not by inserting a row. A missing precondition is reported, not worked around.
+- **Behavior** (`investigations.js`, error toast). Clicking "Close investigation" with an empty root cause or no conclusion shows the toast "Record the root cause and a conclusion, then save, before closing" and does nothing else. Fill and save first.
+- **Behavior** (`investigations.js`). The Conclusion options differ by type: OOS uses `lookups.oosConclusions`; other types offer "No impact", "Impact — see CAPA", "Not applicable". Read the `<option>` texts with `agent-browser eval` before `select`ing.
+- **Behavior** (`server/routes/quality.js` leaves Closed out of the status values; confirmed live 2026-10-18). The Stage select deliberately omits Closed. Closing only happens through the signed button.
+- **Behavior** (`investigations.js`). The page shows an "OOS procedure" card (Phase I / Phase II) only while the investigation is open and of type OOS; its disappearance is part of the closed end state.
