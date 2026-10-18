@@ -16,7 +16,7 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 function checkCopy(change) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aliquot-check-'));
   try {
-    for (const entry of ['server', 'public', 'scripts', 'server.js', '.claude/skills/verify-lims/features']) fs.cpSync(path.join(ROOT, entry), path.join(dir, entry), { recursive: true });
+    for (const entry of ['server', 'public', 'scripts', 'test', 'server.js', '.claude/skills/verify-lims/features']) fs.cpSync(path.join(ROOT, entry), path.join(dir, entry), { recursive: true });
     change(dir);
     return spawnSync(process.execPath, [path.join(dir, 'scripts', 'check.js')], { encoding: 'utf8' });
   } finally {
