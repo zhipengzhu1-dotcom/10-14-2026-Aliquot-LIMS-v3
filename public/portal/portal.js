@@ -702,10 +702,11 @@ const TABLE_FIELDS = ['batch_no', 'description', 'stage', 'priority', 'quantity'
 const TABLE_MIN = 560;
 const GREETING = 'Paste the shipping email or packing list, or attach your spreadsheet. I fill in the submission and mark what I checked and what I guessed. Nothing goes to the lab until you press Send to lab.';
 
-const blankRow = () => ({ description: null, product_code: null, batch_no: null, client_ref: null, quantity: null, container: null, stage: null, priority: null, details: [] });
+// A row's id says which sample it is when the assistant adds, drops or reorders rows; it never reaches the lab.
+const blankRow = (id) => ({ id, description: null, product_code: null, batch_no: null, client_ref: null, quantity: null, container: null, stage: null, priority: null, details: [] });
 const blankDraft = (lk) => ({
   project_id: null, sample_type: null, priority: lk.defaultPriority, storage: null, courier: null, tracking_no: null, ship_date: null, notes: null,
-  method_ids: [], samples: [blankRow()], provenance: { priority: { source: 'default' } }, questions: [],
+  method_ids: [], samples: [blankRow('r1')], provenance: { priority: { source: 'default' } }, questions: [],
 });
 const getAt = (o, path) => path.split('.').reduce((a, k) => a?.[k], o);
 function setAt(o, path, value) {
@@ -713,7 +714,7 @@ function setAt(o, path, value) {
   const last = keys.pop();
   keys.reduce((a, k) => a[k], o)[last] = value;
 }
-const bodyOf = ({ provenance, questions, ...body }) => body;
+const bodyOf = ({ provenance, questions, ...body }) => ({ ...body, samples: body.samples.map(({ id, ...row }) => row) });
 const fid = (path) => `d-${path.replace(/\./g, '-')}`;
 const choiceLabel = (models, model, effort) => `${models.find((m) => m.id === model)?.label ?? model} · ${effort} effort`;
 
@@ -722,10 +723,16 @@ let desk = null;
 
 function newDesk(lk, assistant) {
   return {
-    lk, assistant, draft: blankDraft(lk), gate: null, checking: false, busy: false, tab: 'chat', table: false,
+    lk, assistant, draft: blankDraft(lk), gate: null, checking: false, busy: false, tab: 'chat', table: false, lastRow: 1, declined: [],
     choice: assistant.enabled ? { model: assistant.model, effort: assistant.effort } : null,
     messages: assistant.enabled ? [{ role: 'assistant', text: GREETING }] : [],
   };
+}
+
+/** An id no row of this conversation had. */
+function newRow() {
+  desk.lastRow = Math.max(desk.lastRow, ...[...desk.draft.samples, ...desk.declined].map((r) => Number((r.id ?? r.row)?.slice(1)) || 0)) + 1;
+  return blankRow(`r${desk.lastRow}`);
 }
 
 const rowLabel = (path) => {
@@ -1016,13 +1023,22 @@ function mountDesk(root) {
     desk.touched?.add(path);
   };
   // The draft stays editable while the assistant drafts, with its rows fixed. What the client changed in that time keeps
-  // the client's value and provenance over the reply's.
+  // the client's value and provenance over the reply's, on the same row by id wherever the reply put it.
   const keepTouched = (reply) => {
     for (const path of desk.touched) {
-      const row = /^samples\.(\d+)\./.exec(path)?.[1];
-      while (row != null && reply.samples.length <= Number(row)) reply.samples.push(blankRow());
-      setAt(reply, path, structuredClone(getAt(desk.draft, path)));
-      reply.provenance[path] = desk.draft.provenance[path];
+      const m = /^samples\.(\d+)\.(\w+)$/.exec(path);
+      let at = path;
+      if (m) {
+        const mine = desk.draft.samples[Number(m[1])];
+        let i = reply.samples.findIndex((r) => r.id === mine.id);
+        if (i < 0) {
+          i = reply.samples.push(structuredClone(mine)) - 1;
+          for (const [p, v] of Object.entries(desk.draft.provenance)) if (p.startsWith(`samples.${m[1]}.`)) reply.provenance[p.replace(/^samples\.\d+/, `samples.${i}`)] = v;
+        }
+        at = `samples.${i}.${m[2]}`;
+      }
+      setAt(reply, at, structuredClone(getAt(desk.draft, path)));
+      reply.provenance[at] = desk.draft.provenance[path];
     }
     return reply;
   };
@@ -1046,7 +1062,7 @@ function mountDesk(root) {
     renderChat();
     renderDraft();
     try {
-      const res = await post('/assistant', { message: text, draft: desk.draft, history: before, ...desk.choice });
+      const res = await post('/assistant', { message: text, draft: desk.draft, history: before, declined: desk.declined, ...desk.choice });
       const editedMeanwhile = desk.touched.size > 0;
       desk.draft = keepTouched(res.draft);
       desk.gate = editedMeanwhile ? null : res.gate;
@@ -1088,8 +1104,24 @@ function mountDesk(root) {
     const b = e.target.closest('[data-answer]');
     if (!b || b.disabled || desk.busy) return;
     const [mi, qi] = b.dataset.answer.split(':').map(Number);
-    desk.messages[mi].questions[qi].answered = b.dataset.value;
-    ask(b.dataset.value);
+    const q = desk.messages[mi].questions[qi];
+    q.answered = b.dataset.value;
+    if (!q.proposal) {
+      ask(b.dataset.value);
+      return;
+    }
+    // A change to a value the client set is theirs to take or turn down, here, without another turn of the model.
+    const { row, field, value } = q.proposal;
+    const i = row ? desk.draft.samples.findIndex((r) => r.id === row) : -1;
+    const path = row ? (i < 0 ? null : `samples.${i}.${field}`) : field;
+    if (b.dataset.value === q.options[0] && path) {
+      setAt(desk.draft, path, structuredClone(value));
+      mark(path, 'edited', 'You took the assistant’s suggestion.');
+    } else if (b.dataset.value !== q.options[0]) {
+      desk.declined.push(q.proposal);
+    }
+    renderChat();
+    changed({ structure: true });
   });
   $in('.as-tabs').addEventListener('click', (e) => {
     const b = e.target.closest('[data-tab]');
@@ -1139,7 +1171,7 @@ function mountDesk(root) {
     if (remove) {
       const i = Number(remove.dataset.remove);
       d.samples.splice(i, 1);
-      if (!d.samples.length) d.samples.push(blankRow());
+      if (!d.samples.length) d.samples.push(newRow());
       d.provenance = Object.fromEntries(Object.entries(d.provenance).flatMap(([path, p]) => {
         const m = /^samples\.(\d+)\.(.+)$/.exec(path);
         if (!m) return [[path, p]];
@@ -1150,7 +1182,7 @@ function mountDesk(root) {
       return;
     }
     if (e.target.closest('[data-add]')) {
-      d.samples.push(blankRow());
+      d.samples.push(newRow());
       changed({ structure: true });
       $(`#${fid(`samples.${d.samples.length - 1}.description`)}`, root)?.focus();
       return;
@@ -1251,7 +1283,7 @@ function mountDesk(root) {
       const m = /^samples\.(\d+)\./.exec(path);
       return !m || !blank(d.samples[+m[1]]);
     });
-    d.samples = [...kept, ...added.map((r) => ({ ...blankRow(), ...Object.fromEntries(ROW_FIELDS.map(([k]) => [k, r[k] || null])), details: r.details }))];
+    d.samples = [...kept, ...added.map((r) => ({ ...newRow(), ...Object.fromEntries(ROW_FIELDS.map(([k]) => [k, r[k] || null])), details: r.details }))];
     d.provenance = Object.fromEntries(keptProvenance);
     added.forEach((r, j) => {
       for (const [k] of ROW_FIELDS) if (r[k]) mark(`samples.${kept.length + j}.${k}`, 'sheet');
