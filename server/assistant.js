@@ -389,8 +389,9 @@ export function gateDraft(context, draft) {
 }
 
 /**
- * A problem the model asked the client about is the client's to answer, not another try's. So is a draft with no samples
- * at all: only the client can name what they are shipping, so a greeting is answered once rather than retried.
+ * A problem the model asked the client about is the client's to answer, not another try's. So is the number of samples,
+ * none or more than a submission holds: only the client can name or split what they are shipping, so a greeting is
+ * answered once rather than retried.
  */
 const asked = (problem, questions) => problem.rule === 'sample-count'
   || questions.some((q) => q.path && (problem.path === q.path || problem.path.startsWith(`${q.path}.`)));
