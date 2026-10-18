@@ -30,7 +30,7 @@ A verify run drives it on the stand-in Claude, never the real one. SKILL.md's **
 
 ## Driving it with agent-browser
 
-Launch normally (doctor must print `claude: fake …`), then give the stand-in its answers. This one is rebuilt from the 2026-10-18 drive's screen (`.verify/evidence/maint/15-assistant-draft.png`, "I drafted one lot." in 3.0 s); that run's file was not kept. It fills the courier as the client's words and leaves storage, ship date and the sample row without a claimed source, so they show as guessed. Set `ship_date` to a date after the run:
+Launch normally (doctor must print `claude: fake …`), then give the stand-in its answers. This file was run as written on 2026-10-18 through `POST /api/portal/assistant`: the reply read "I drafted one lot." in 3.0 s, batch L-1, storage guessed. It fills the courier as the client's words and leaves storage, ship date and the sample row without a claimed source, so they show as guessed. Set `ship_date` to a date after the run:
 
 ```bash
 R=.verify/runs/verify
