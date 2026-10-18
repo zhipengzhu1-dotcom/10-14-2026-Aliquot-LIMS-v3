@@ -35,8 +35,26 @@ export function assistantSetting() {
   };
 }
 
-/** "Opus 5.5" for "claude-opus-5-5"; any other name as it is. */
+/** The models a lab or a client may choose, with their names, and the efforts each may run at. */
+export const MODELS = { 'claude-opus-5-5': 'Opus 5.5', 'claude-sonnet-5-5': 'Sonnet 5.5', 'claude-haiku-5-5': 'Haiku 5.5' };
+export const EFFORTS = ['low', 'medium', 'high'];
+export const CHOICES = { models: Object.entries(MODELS).map(([id, label]) => ({ id, label })), efforts: EFFORTS };
+
+/**
+ * The model and effort `input` asks for, each falling back to `fallback`'s. Both end up as arguments to the claude
+ * command, so anything outside the table is refused here.
+ */
+export function readChoice(input, fallback) {
+  const model = input?.model ?? fallback.model;
+  const effort = input?.effort ?? fallback.effort;
+  if (!Object.hasOwn(MODELS, model)) throw bad(`Model must be one of: ${Object.keys(MODELS).join(', ')}`);
+  if (!EFFORTS.includes(effort)) throw bad(`Effort must be one of: ${EFFORTS.join(', ')}`);
+  return { model, effort };
+}
+
+/** "Opus 5.5" for "claude-opus-5-5"; a model outside the table by the same pattern, or as it is. */
 export function modelLabel(id) {
+  if (Object.hasOwn(MODELS, id ?? '')) return MODELS[id];
   const m = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(id ?? '');
   return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}.${m[3]}` : id;
 }
@@ -48,24 +66,32 @@ const SIGN_IN = 'On the computer that runs Aliquot, run: claude auth login';
 export async function assistantStatus() {
   try {
     const account = await claudeAccount();
-    return { setting: assistantSetting(), account: account.loggedIn ? { ...account, name: accountName(account) } : null, problem: account.loggedIn ? null : `No Claude account is signed in. ${SIGN_IN}` };
+    return { setting: assistantSetting(), choices: CHOICES, account: account.loggedIn ? { ...account, name: accountName(account) } : null, problem: account.loggedIn ? null : `No Claude account is signed in. ${SIGN_IN}` };
   } catch (e) {
-    return { setting: assistantSetting(), account: null, problem: e.message };
+    return { setting: assistantSetting(), choices: CHOICES, account: null, problem: e.message };
   }
 }
 
-/** An administrator turns the assistant on: refused unless a Claude account is signed in; the audit names them and the account. */
-export async function enableAssistant(ctx) {
-  const account = await claudeAccount();
-  if (!account.loggedIn) throw bad(`No Claude account is signed in on this computer. ${SIGN_IN}`, 'CLAUDE_SIGNED_OUT');
-  setSettings(ctx, {
-    assistant_enabled: '1', assistant_approved_by: ctx.user.full_name, assistant_approved_at: nowIso(), assistant_account: accountName(account),
-  }, `Submission assistant turned on with the Claude account ${accountName(account)}`);
-  return assistantStatus();
-}
-
-export function disableAssistant(ctx) {
-  setSettings(ctx, { assistant_enabled: '0' }, 'Submission assistant turned off');
+/**
+ * An administrator turns the assistant on or off and sets the default model and effort. Turning it on is refused unless
+ * a Claude account is signed in; the audit names the administrator and the account.
+ */
+export async function updateAssistant(ctx, input) {
+  const current = assistantSetting();
+  const { model, effort } = readChoice(input, current);
+  const patch = { assistant_model: model, assistant_effort: effort };
+  const choice = `${modelLabel(model)}, ${effort} effort`;
+  if (input?.enabled === true && !current.enabled) {
+    const account = await claudeAccount();
+    if (!account.loggedIn) throw bad(`No Claude account is signed in on this computer. ${SIGN_IN}`, 'CLAUDE_SIGNED_OUT');
+    setSettings(ctx, {
+      ...patch, assistant_enabled: '1', assistant_approved_by: ctx.user.full_name, assistant_approved_at: nowIso(), assistant_account: accountName(account),
+    }, `Submission assistant turned on with the Claude account ${accountName(account)} (${choice} by default)`);
+  } else if (input?.enabled === false && current.enabled) {
+    setSettings(ctx, { ...patch, assistant_enabled: '0' }, 'Submission assistant turned off');
+  } else {
+    setSettings(ctx, patch, `Submission assistant default set to ${choice}`);
+  }
   return assistantStatus();
 }
 
@@ -260,12 +286,11 @@ const readHistory = (raw) => (Array.isArray(raw) ? raw : [])
   .map((h) => ({ role: h.role, text: text(h.text, 4000) }));
 
 /**
- * One turn of the conversation for portal contact `pu`: the client's `message`, the draft so far and the turns before.
- * Returns the assistant's reply, the new draft with its gate verdict, how many tries it took, and who answered.
+ * One turn of the conversation for portal contact `pu`: the client's `message`, the draft so far and the turns before,
+ * answered by the `model` at `effort` that `readChoice` allowed. Returns the assistant's reply, the new draft with its gate verdict, how many tries it took, and who answered.
  */
-export async function draftSubmission(pu, input) {
-  const setting = assistantSetting();
-  if (!setting.enabled) throw unavailable('The assistant is off. Your lab has not turned it on.');
+export async function draftSubmission(pu, input, { model: chosen, effort }) {
+  if (!assistantSetting().enabled) throw unavailable('The assistant is off. Your lab has not turned it on.');
   const message = text(input?.message, MAX_MESSAGE + 1);
   if (!message) throw bad('Write a message first');
   if (message.length > MAX_MESSAGE) throw bad(`That message is too long (max ${MAX_MESSAGE} characters)`);
@@ -275,12 +300,12 @@ export async function draftSubmission(pu, input) {
   const clientWords = [message, ...history.filter((h) => h.role === 'client').map((h) => h.text)].join('\n');
   const started = Date.now();
   let problems = null;
-  let model = setting.model;
+  let model = chosen;
   let turn = null;
   let attempts = 0;
   while (attempts < ATTEMPTS) {
     attempts++;
-    const answer = await askClaude({ system: SYSTEM, prompt: draftPrompt({ context, draft: previous, history, message, problems }), schema: DRAFT_SCHEMA, model: setting.model, effort: setting.effort });
+    const answer = await askClaude({ system: SYSTEM, prompt: draftPrompt({ context, draft: previous, history, message, problems }), schema: DRAFT_SCHEMA, model: chosen, effort });
     model = answer.model;
     const read = readModelDraft(answer.output, { previous, clientWords });
     if (!read) {
@@ -300,6 +325,6 @@ export async function draftSubmission(pu, input) {
   const { ok, problems: gateProblems } = result.gate;
   return {
     reply: result.reply, draft: result.draft, gate: { ok, problems: gateProblems }, attempts, unresolved: problems ?? [],
-    model, model_label: modelLabel(model), effort: setting.effort, ms: Date.now() - started,
+    model, model_label: modelLabel(model), effort, ms: Date.now() - started,
   };
 }

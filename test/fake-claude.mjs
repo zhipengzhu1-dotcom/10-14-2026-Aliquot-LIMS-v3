@@ -2,7 +2,8 @@
 // and FAKE_CLAUDE_DIR at a folder holding:
 //   signed-out     present: `auth status` reports no account
 //   replies.json   the answers to `-p` calls, in order; the last repeats. Each is { output } for a structured answer,
-//                  { raw, exit } for what a broken CLI prints, and may add delay_ms.
+//                  { raw, exit } for what a broken CLI prints, and may add delay_ms. The answer names the model it was
+//                  asked for in modelUsage, or { answered_by } instead.
 // Every call is appended to calls.jsonl as { args, input, start, end }.
 
 import fs from 'node:fs';
@@ -35,5 +36,5 @@ if ('raw' in reply) {
 }
 process.stdout.write(JSON.stringify({
   type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(reply.output), structured_output: reply.output,
-  modelUsage: { 'claude-haiku-4-5': { outputTokens: 3 }, 'claude-opus-5-5': { outputTokens: 400 } },
+  modelUsage: { 'claude-haiku-4-5': { outputTokens: 3 }, [reply.answered_by ?? args[args.indexOf('--model') + 1]]: { outputTokens: 400 } },
 }));

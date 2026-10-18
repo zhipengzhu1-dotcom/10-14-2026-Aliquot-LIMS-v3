@@ -7,12 +7,16 @@ import { pageHead, card, field, formData, toast, busy, plural, fmtDateTime } fro
 /** The submission assistant's card: what it does, whether it is on and who approved it, and the Claude account found now. */
 function assistantBody(st) {
   const s = st.setting;
-  return html`<p class="small" style="margin:0 0 10px">Drafts sample submissions in the client portal from what clients paste or attach. It uses the Claude subscription signed in on the computer that runs Aliquot (${s.model}, ${s.effort} effort). It never sends anything: the client reviews the draft and presses Send to lab.</p>
+  return html`<p class="small" style="margin:0 0 10px">Drafts sample submissions in the client portal from what clients paste or attach. It uses the Claude subscription signed in on the computer that runs Aliquot. It never sends anything: the client reviews the draft and presses Send to lab. Clients may pick another model or effort for one conversation; this is where each starts.</p>
     <dl class="kv">
       <dt>Status</dt><dd data-assistant-state>${s.enabled ? 'On' : 'Off'}</dd>
       ${s.approved_by ? html`<dt>${s.enabled ? 'Approved by' : 'Last approved by'}</dt><dd>${s.approved_by}, ${fmtDateTime(s.approved_at)}</dd><dt>Approved account</dt><dd>${s.account}</dd>` : ''}
       <dt>Claude account found</dt><dd>${st.account ? st.account.name : html`<span class="muted">${st.problem}</span>`}</dd>
     </dl>
+    <div class="form-grid" style="margin-top:12px">
+      ${field({ label: 'Default model', name: 'assistant_model', type: 'select', options: st.choices.models.map((m) => [m.id, m.label]), value: s.model })}
+      ${field({ label: 'Default effort', name: 'assistant_effort', type: 'select', options: st.choices.efforts, value: s.effort })}
+    </div>
     <div style="margin-top:12px">${s.enabled
       ? html`<button class="btn" type="button" data-act="assistant-off">Turn off</button>`
       : html`<button class="btn primary" type="button" data-act="assistant-on">Turn on</button>`}</div>`;
@@ -27,9 +31,13 @@ async function mountAssistant(box) {
     return;
   }
   box.innerHTML = String(card({ title: 'Submission assistant', body: assistantBody(status) }));
+  const choice = () => ({ model: box.querySelector('[name=assistant_model]').value, effort: box.querySelector('[name=assistant_effort]').value });
+  box.querySelectorAll('[name^=assistant_]').forEach((el) => el.addEventListener('change', async () => {
+    if (await busy(null, () => api.post('/api/settings/assistant', choice()))) toast('Default model saved');
+  }));
   box.querySelector('[data-act^=assistant]').addEventListener('click', async (e) => {
     const on = e.currentTarget.dataset.act === 'assistant-on';
-    const st = await busy(e.currentTarget, () => api.post('/api/settings/assistant', { enabled: on }));
+    const st = await busy(e.currentTarget, () => api.post('/api/settings/assistant', { enabled: on, ...choice() }));
     if (!st) return;
     toast(on ? 'Submission assistant turned on' : 'Submission assistant turned off');
     mountAssistant(box);

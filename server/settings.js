@@ -18,7 +18,7 @@ export const DEFAULTS = {
   session_idle_minutes: '60',
   coa_statement: 'The results in this certificate relate only to the samples tested as received. This certificate shall not be reproduced except in full without the written approval of the laboratory.',
   demo_mode: '0',
-  // The submission assistant. Only enableAssistant / disableAssistant (server/assistant.js) write these.
+  // The submission assistant. Only updateAssistant (server/assistant.js) writes these.
   assistant_enabled: '0',
   assistant_model: 'claude-opus-5-5',
   assistant_effort: 'medium',

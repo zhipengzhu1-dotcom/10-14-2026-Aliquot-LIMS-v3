@@ -6,7 +6,7 @@ import {
   can, checkPasswordPolicy, destroySession, destroyOtherSessions, hashPassword, login, permissionsFor, publicUser, registerFailure, verifyPassword,
 } from '../auth.js';
 import { getSettings, setSettings, DEFAULTS, ASSISTANT_SETTINGS } from '../settings.js';
-import { assistantStatus, enableAssistant, disableAssistant } from '../assistant.js';
+import { assistantStatus, updateAssistant } from '../assistant.js';
 import { ROLES, lookups, RECORD_ACCESS, MONEY_FIELDS, PRIORITY_TIERS, rolesWith } from '../lookups.js';
 import { clean, initialsOf, likeTerm, limitParam, nowIso, today, addDays } from '../util.js';
 import { seedDemo } from '../seed.js';
@@ -237,7 +237,7 @@ export default function routes(r) {
   }, { perm: 'settings.edit' });
 
   r.get('/api/settings/assistant', () => assistantStatus(), { perm: 'settings.edit' });
-  r.post('/api/settings/assistant', (ctx) => (ctx.body.enabled === true ? enableAssistant(ctx) : disableAssistant(ctx)), { perm: 'settings.edit' });
+  r.post('/api/settings/assistant', (ctx) => updateAssistant(ctx, ctx.body), { perm: 'settings.edit' });
 
   // ---------- Audit trail ----------
   r.get('/api/audit', (ctx) => {

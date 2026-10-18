@@ -88,7 +88,13 @@ after(async () => {
 
 test('the assistant is off until an administrator turns it on with a signed-in Claude account, and the audit names both', async () => {
   fake([answer({})]);
-  assert.deepEqual(await laura.ok('GET', '/api/portal/assistant'), { enabled: false, model: 'claude-opus-5-5', model_label: 'Opus 5.5', effort: 'medium' });
+  assert.deepEqual(await laura.ok('GET', '/api/portal/assistant'), {
+    enabled: false, model: 'claude-opus-5-5', model_label: 'Opus 5.5', effort: 'medium',
+    choices: {
+      models: [{ id: 'claude-opus-5-5', label: 'Opus 5.5' }, { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5' }, { id: 'claude-haiku-5-5', label: 'Haiku 5.5' }],
+      efforts: ['low', 'medium', 'high'],
+    },
+  });
   const off = await laura.req('POST', '/api/portal/assistant', { message: MESSAGE });
   assert.deepEqual([off.status, off.data.error], [503, 'The assistant is off. Your lab has not turned it on.']);
   assert.deepEqual(prompts(), [], 'no model is called while the assistant is off');
@@ -110,7 +116,7 @@ test('the assistant is off until an administrator turns it on with a signed-in C
   assert.deepEqual(calls().map((c) => c.args), [['auth', 'status'], ['auth', 'status']], 'turning on asks the claude command who is signed in');
   const audit = await admin.ok('GET', '/api/audit?entity=settings&limit=5');
   const entry = audit.find((a) => a.summary.startsWith('Submission assistant'));
-  assert.equal(entry.summary, 'Submission assistant turned on with the Claude account lab@example.com, max plan');
+  assert.equal(entry.summary, 'Submission assistant turned on with the Claude account lab@example.com, max plan (Opus 5.5, medium effort by default)');
   assert.equal(entry.username, 'admin');
 
   await admin.ok('PUT', '/api/settings', { assistant_enabled: '0', assistant_account: 'someone else' });
@@ -240,6 +246,38 @@ test('at most two calls reach Claude at once; the rest wait their turn', async (
   const spans = prompts();
   const overlap = Math.max(...spans.map((a) => spans.filter((b) => b.start < a.end && a.start < b.end).length));
   assert.equal(overlap, 2);
+});
+
+test('a conversation may pick any model and effort in the table, nothing outside it; the lab sets the default', async () => {
+  fake([answer({ samples: [row('L-1')] })]);
+  const turn = await laura.ok('POST', '/api/portal/assistant', { message: 'One lot', model: 'claude-haiku-5-5', effort: 'low' });
+  assert.deepEqual([turn.model, turn.model_label, turn.effort], ['claude-haiku-5-5', 'Haiku 5.5', 'low']);
+  const flags = (c) => [c.args[c.args.indexOf('--model') + 1], c.args[c.args.indexOf('--effort') + 1]];
+  assert.deepEqual(flags(prompts()[0]), ['claude-haiku-5-5', 'low']);
+
+  fake([{ answered_by: 'claude-sonnet-5-5', ...answer({ samples: [row('L-1')] }) }]);
+  const relabelled = await laura.ok('POST', '/api/portal/assistant', { message: 'One lot', effort: 'high' });
+  assert.deepEqual([relabelled.model_label, relabelled.effort], ['Sonnet 5.5', 'high'], 'the label names the model that answered, the effort the one asked for');
+  assert.deepEqual(flags(prompts()[0]), ['claude-opus-5-5', 'high'], 'an unnamed model is the lab default');
+
+  fake([answer({ samples: [row('L-1')] })]);
+  for (const [choice, error] of [
+    [{ model: 'claude-opus-4-1' }, 'Model must be one of: claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5'],
+    [{ model: '--dangerously-skip-permissions' }, 'Model must be one of: claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5'],
+    [{ effort: 'max' }, 'Effort must be one of: low, medium, high'],
+    [{ effort: ['low'] }, 'Effort must be one of: low, medium, high'],
+  ]) {
+    const r = await laura.req('POST', '/api/portal/assistant', { message: 'One lot', ...choice });
+    assert.deepEqual([r.status, r.data.error], [400, error]);
+  }
+  assert.deepEqual(prompts(), [], 'a refused choice never reaches the claude command');
+
+  assert.equal((await admin.req('POST', '/api/settings/assistant', { model: 'claude-sonnet-4' })).status, 400);
+  const set = await admin.ok('POST', '/api/settings/assistant', { model: 'claude-sonnet-5-5', effort: 'high' });
+  assert.deepEqual([set.setting.enabled, set.setting.model, set.setting.effort], [true, 'claude-sonnet-5-5', 'high']);
+  assert.deepEqual(await laura.ok('GET', '/api/portal/assistant').then((a) => [a.model_label, a.effort]), ['Sonnet 5.5', 'high']);
+  assert.equal((await admin.ok('GET', '/api/audit?entity=settings&limit=1'))[0].summary, 'Submission assistant default set to Sonnet 5.5, high effort');
+  await admin.ok('POST', '/api/settings/assistant', { model: 'claude-opus-5-5', effort: 'medium' });
 });
 
 test('turned off, the assistant refuses the next turn', async () => {
