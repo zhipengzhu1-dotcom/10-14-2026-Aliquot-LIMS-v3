@@ -639,7 +639,7 @@ form.card { counter-reset: step; }
 @media (min-width: 720px) { .as-pick { min-height: 32px; font-size: 11px; } }
 .as-thread { max-height: 62vh; min-height: 240px; }
 @media (max-width: 899px) { .as-thread { max-height: none; } }
-.as-reply .bubble { box-shadow: inset 3px 0 0 var(--lime); white-space: normal; }
+.as-reply .bubble, .as-live .bubble { box-shadow: inset 3px 0 0 var(--lime); white-space: normal; }
 .as-text { white-space: pre-wrap; }
 .as-q { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line-strong); white-space: normal; }
 .as-q b { display: block; margin-bottom: 6px; font-weight: 650; }
@@ -650,6 +650,7 @@ form.card { counter-reset: step; }
 .as-choice[disabled] { cursor: default; opacity: .55; }
 .as-choice[aria-pressed="true"][disabled] { opacity: 1; }
 .as-typing { display: inline-flex; gap: 4px; }
+.as-text:not(:empty) + .as-typing { margin-left: 6px; }
 .as-typing i { width: 6px; height: 6px; background: var(--muted); animation: blink 1s infinite; }
 .as-typing i:nth-child(2) { animation-delay: .15s; } .as-typing i:nth-child(3) { animation-delay: .3s; }
 .as-composer { display: grid; gap: 8px; padding: 12px 14px 14px; border-top: 1px solid var(--line-strong); }

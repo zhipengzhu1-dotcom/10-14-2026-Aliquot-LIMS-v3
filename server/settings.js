@@ -21,7 +21,7 @@ export const DEFAULTS = {
   // The submission assistant. Only updateAssistant (server/assistant.js) writes these.
   assistant_enabled: '0',
   assistant_model: 'claude-opus-5-5',
-  assistant_effort: 'medium',
+  assistant_effort: 'low',
   assistant_approved_by: '',
   assistant_approved_at: '',
   assistant_account: '',
