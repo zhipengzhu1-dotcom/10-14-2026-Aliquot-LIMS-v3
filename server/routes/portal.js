@@ -13,9 +13,10 @@ import { HttpError, bad, forbidden, notFound, guard, flags } from '../http.js';
 import { assertCan, can, checkPasswordPolicy, hashPassword, verifyPassword } from '../auth.js';
 import { portalAuth, portalLogin, portalLogout, portalCtx, publicPortalUser, portalDestroyOtherSessions } from '../portal-auth.js';
 import { getSettings } from '../settings.js';
-import { SAMPLE_TYPES, STORAGE_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, TECHNIQUES, SAMPLE_OPEN, PROJECT_OPEN } from '../lookups.js';
+import { SAMPLE_TYPES, STORAGE_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, TECHNIQUES, SAMPLE_OPEN } from '../lookups.js';
 import { clean, nowIso, idList, addDays, today, specText, fixed } from '../util.js';
-import { receiveSamples, cleanSampleRows } from './lab.js';
+import { receiveSamples } from './lab.js';
+import { checkSubmission, submissionContext, clientMethods, openProjects } from '../submission-gate.js';
 import { createProject } from './business.js';
 import { previewXlsx } from '../ooxml.js';
 
@@ -89,17 +90,6 @@ const threadMessages = (id, { forClient }) => all(`
 // Validation schemas
 // ---------------------------------------------------------------------------------------------
 
-const submissionSchema = {
-  project_id: { type: 'id', ref: 'projects', label: 'project' },
-  sample_type: { type: 'enum', values: SAMPLE_TYPES },
-  priority: { type: 'enum', values: PRIORITIES, default: DEFAULT_PRIORITY },
-  storage: { type: 'enum', values: STORAGE_CONDITIONS },
-  courier: { max: 120 },
-  tracking_no: { max: 120, label: 'tracking number' },
-  ship_date: { type: 'date', label: 'ship date' },
-  notes: { type: 'text', max: 5000 },
-};
-
 const requestSchema = {
   type: { type: 'enum', values: REQUEST_TYPES, required: true },
   title: { required: true, max: 200 },
@@ -109,14 +99,6 @@ const requestSchema = {
   regulatory: { max: 200, label: 'regulatory context' },
   target_date: { type: 'date', label: 'target date' },
 };
-
-/** Methods a client may request: effective, ready to use (has parameters), general or theirs. No prices. */
-const clientMethods = (clientId) => all(`
-  SELECT m.id, m.code, m.version, m.title, m.technique, m.tat_days
-  FROM methods m
-  WHERE m.status = 'Effective' AND (m.client_id IS NULL OR m.client_id = ?)
-    AND EXISTS (SELECT 1 FROM method_analytes a WHERE a.method_id = m.id)
-  ORDER BY m.code`, clientId);
 
 // Client-facing views of lab records — explicit column lists, never SELECT *.
 const CLIENT_SAMPLE = `
@@ -203,9 +185,6 @@ export const REQUEST_RULES = {
   },
 };
 
-/** A client's open Projects, the ones a submission may name. Mirrors PROJECT_RULES.receive, reading the same open statuses. */
-const openProjects = (clientId) => all(`SELECT id, code, title FROM projects WHERE client_id = ? AND status IN (${ph(PROJECT_OPEN)}) ORDER BY code DESC`, clientId, ...PROJECT_OPEN);
-
 const getSubmission = (id) => mustGet('SELECT * FROM portal_submissions WHERE id = ?', id, 'Submission');
 
 /** Invites a client contact. Returns a one-time temporary password (shown once to staff, never stored in clear). */
@@ -223,12 +202,9 @@ export function createPortalAccount(ctx, input, presetPassword = null) {
 
 /** A client contact announces a shipment. ctx is a portal audit context (see portalCtx). */
 export function submitSamples(ctx, pu, input) {
-  const b = clean(input, submissionSchema);
-  if (b.project_id && !openProjects(pu.client_id).some((p) => p.id === b.project_id)) throw bad('Project not found');
-  const rows = cleanSampleRows(input.samples, { max: 120 });
-  const allowed = new Set(clientMethods(pu.client_id).map((m) => m.id));
-  const methodIds = idList(input.method_ids);
-  if (methodIds.some((id) => !allowed.has(id))) throw bad('One of the selected tests is not available');
+  const gate = checkSubmission(submissionContext(pu.client_id), input);
+  if (!gate.ok) throw bad(gate.problems[0].message);
+  const { samples: rows, method_ids: methodIds, ...b } = gate.submission;
   return tx(() => {
     const code = nextCode('SUB');
     const t = nowIso();
@@ -507,6 +483,12 @@ export default function routes(r) {
   }, { auth: false, raw: true, limit: 2 * 1024 * 1024 });
 
   r.post('/api/portal/submissions', (ctx) => submitSamples(portalCtx(ctx, portalAuth(ctx)), ctx.portal, ctx.body), open);
+
+  // The checks a submission must pass, run on a draft without saving it.
+  r.post('/api/portal/submissions/check', (ctx) => {
+    const { ok, problems } = checkSubmission(submissionContext(portalAuth(ctx).client_id), ctx.body);
+    return { ok, problems };
+  }, open);
 
   r.post('/api/portal/submissions/:id/withdraw', (ctx) => {
     const pu = portalAuth(ctx);

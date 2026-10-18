@@ -143,6 +143,27 @@ export function clean(input, schema, { partial = false } = {}) {
   return out;
 }
 
+const loose = (v) => String(v).toLowerCase().replace(/[\s\u2010-\u2015\u2212-]+/g, '');
+
+/**
+ * `clean`, one key at a time: the keys that passed, and every refusal with its key instead of only the first one thrown.
+ * An enum value that differs from an allowed one only in case, spaces or dashes carries that one as its `fix`.
+ */
+export function cleanAll(input, schema) {
+  const value = {};
+  const problems = [];
+  for (const [key, spec] of Object.entries(schema)) {
+    try {
+      Object.assign(value, clean(input, { [key]: spec }));
+    } catch (e) {
+      if (!(e instanceof HttpError)) throw e;
+      const meant = spec.type === 'enum' && typeof input?.[key] === 'string' ? spec.values.find((v) => loose(v) === loose(input[key])) : undefined;
+      problems.push({ key, message: e.message, ...(meant ? { fix: { value: meant } } : {}) });
+    }
+  }
+  return { value, problems };
+}
+
 /** A safe positive integer row limit for list endpoints. */
 export function limitParam(v, fallback, max) {
   const n = Math.floor(Number(v));

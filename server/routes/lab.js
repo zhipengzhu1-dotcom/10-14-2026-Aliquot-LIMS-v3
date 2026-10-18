@@ -4,13 +4,13 @@
 import { all, get, run, ph, tx } from '../db.js';
 import { insert, update, nextCode, mustGet } from '../repo.js';
 import { audit } from '../audit.js';
-import { bad, guard, flags, queued, workQueue } from '../http.js';
+import { HttpError, bad, guard, flags, queued, workQueue } from '../http.js';
 import { assertCan } from '../auth.js';
 import { getNumber, getSettings } from '../settings.js';
 import {
   SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, CUSTODY_ACTIONS, METHOD_USABLE, SAMPLE_OPEN, priorityRank, rolesWith,
 } from '../lookups.js';
-import { clean, nowIso, today, addBusinessDays, dateOf, idList, likeTerm, limitParam, round } from '../util.js';
+import { clean, cleanAll, nowIso, today, addBusinessDays, dateOf, idList, likeTerm, limitParam, round } from '../util.js';
 import {
   TEST_SELECT, TEST_QUEUES, TEST_RULES, SAMPLE_SELECT, SAMPLE_QUEUES, SAMPLE_RULES, TEST_OPEN, getTest, isQualified, instrumentProblem, materialProblem, refreshSampleStatus,
   unassignedTests, assignTests, claimTest, startTest, saveResults, submitTest, reviewTest, approveTest, cancelTest, issueReport, cancelSample,
@@ -91,26 +91,44 @@ function cleanDetails(raw, n) {
 const hasContent = (v) => (Array.isArray(v) ? v.length > 0 : String(v ?? '').trim() !== '');
 
 /**
- * The one cleaner for sample rows, from the lab's receipt form and from a client's submission. `max` caps each text
- * field; `legacyTiers` admits the retired tiers a submission stored before they were retired may carry. Every row
- * comes back with `details`, an empty list when the sheet had none.
+ * The one check of sample rows, from the lab's receipt form and from a client's submission: the cleaned rows and every
+ * problem, each at its path in `raw` (`samples.<index>.<field>`). `max` caps each text field; `legacyTiers` admits the
+ * retired tiers a submission stored before they were retired may carry. Every row comes back with `details`, an empty
+ * list when the sheet had none.
  */
-export function cleanSampleRows(raw, { max = 500, legacyTiers = false } = {}) {
+export function checkSampleRows(raw, { max = 500, legacyTiers = false } = {}) {
   const tiers = legacyTiers ? Object.keys(PRIORITY_TIERS) : PRIORITIES;
+  const problems = [];
   const rows = (Array.isArray(raw) ? raw : [])
-    .filter((s) => s && typeof s === 'object' && Object.values(s).some(hasContent))
-    .map((s, i) => ({
-      ...clean(s, {
+    .map((s, at) => [s, at])
+    .filter(([s]) => s && typeof s === 'object' && Object.values(s).some(hasContent))
+    .map(([s, at], i) => {
+      const { value, problems: refused } = cleanAll(s, {
         description: { required: true, label: `sample ${i + 1} description` },
         batch_no: { max }, client_ref: { max }, quantity: { max }, container: { max },
         product_code: { max, label: `sample ${i + 1} product code` },
         stage: { type: 'enum', values: STAGES, label: `sample ${i + 1} stage` },
         priority: { type: 'enum', values: tiers, label: `sample ${i + 1} turnaround` },
-      }),
-      details: cleanDetails(s.details, i + 1),
-    }));
-  if (!rows.length) throw bad('Add at least one sample');
-  if (rows.length > 200) throw bad('At most 200 samples at a time');
+      });
+      problems.push(...refused.map(({ key, ...p }) => ({ path: `samples.${at}.${key}`, rule: 'sample-field', ...p })));
+      let details = [];
+      try {
+        details = cleanDetails(s.details, i + 1);
+      } catch (e) {
+        if (!(e instanceof HttpError)) throw e;
+        problems.push({ path: `samples.${at}.details`, rule: 'sample-field', message: e.message });
+      }
+      return { ...value, details };
+    });
+  if (!rows.length) problems.push({ path: 'samples', rule: 'sample-count', message: 'Add at least one sample' });
+  if (rows.length > 200) problems.push({ path: 'samples', rule: 'sample-count', message: 'At most 200 samples at a time' });
+  return { rows, problems };
+}
+
+/** `checkSampleRows`, refusing the first problem. */
+export function cleanSampleRows(raw, opts) {
+  const { rows, problems } = checkSampleRows(raw, opts);
+  if (problems.length) throw bad(problems[0].message);
   return rows;
 }
 
