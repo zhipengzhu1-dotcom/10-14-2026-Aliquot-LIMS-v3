@@ -2,9 +2,10 @@
 // and FAKE_CLAUDE_DIR at a folder holding:
 //   signed-out     present: `auth status` reports no account
 //   replies.json   the answers to `-p` calls, in order; the last repeats. Each is { output } for a structured answer,
-//                  { raw, exit } for what a broken CLI prints, and may add delay_ms. The answer names the model it was
-//                  asked for in modelUsage, or { answered_by } instead.
-// Every call is appended to calls.jsonl as { args, input, start, end }.
+//                  { raw, exit } for what a broken CLI prints, and may add delay_ms, and ignore_term to outlast a
+//                  SIGTERM. The answer names the model it was asked for in modelUsage, or { answered_by } instead.
+// Every call is appended to calls.jsonl as { args, cwd, input, start, end } when it answers, and a `-p` call also as
+// { args, cwd, pid, start } when it starts and { ..., term: true } when it gets a SIGTERM.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -13,7 +14,7 @@ const dir = process.env.FAKE_CLAUDE_DIR;
 const args = process.argv.slice(2);
 const calls = path.join(dir, 'calls.jsonl');
 const start = Date.now();
-const record = (entry) => fs.appendFileSync(calls, `${JSON.stringify({ args, ...entry, start, end: Date.now() })}\n`);
+const record = (entry) => fs.appendFileSync(calls, `${JSON.stringify({ args, cwd: process.cwd(), ...entry, start, end: Date.now() })}\n`);
 
 if (args[0] === 'auth' && args[1] === 'status') {
   const signedIn = !fs.existsSync(path.join(dir, 'signed-out'));
@@ -28,6 +29,8 @@ const input = fs.readFileSync(0, 'utf8');
 const done = fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.includes('"input"')).length : 0;
 const replies = JSON.parse(fs.readFileSync(path.join(dir, 'replies.json'), 'utf8'));
 const reply = replies[Math.min(done, replies.length - 1)];
+record({ pid: process.pid });
+if (reply.ignore_term) process.on('SIGTERM', () => record({ pid: process.pid, term: true }));
 if (reply.delay_ms) await new Promise((resolve) => setTimeout(resolve, reply.delay_ms));
 record({ input });
 if ('raw' in reply) {

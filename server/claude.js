@@ -2,28 +2,47 @@
 // own Claude subscription. Nothing about the account is stored in Aliquot. Moving to an API key changes this file only.
 
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { HttpError } from './http.js';
 
 const MAX_RUNNING = 2;
 const MAX_WAITING = 8;
 const ANSWER_TIMEOUT_MS = 120_000;
 const STATUS_TIMEOUT_MS = 20_000;
+const KILL_GRACE_MS = 2_000;
 const MAX_OUTPUT = 4 * 1024 * 1024;
 
 export const unavailable = (reason) => new HttpError(503, reason, 'ASSISTANT_UNAVAILABLE');
 
-/** Runs the claude command with `args` (never through a shell), `input` on stdin. Resolves to its exit code and output. */
+// The claude command reads CLAUDE.md and project files from its working directory and the folders above it, so it runs
+// in an empty folder of its own, outside Aliquot's.
+let emptyDir = null;
+const workDir = () => {
+  if (!emptyDir || !fs.existsSync(emptyDir)) emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aliquot-claude-'));
+  return emptyDir;
+};
+
+/**
+ * Runs the claude command with `args` (never through a shell), `input` on stdin. Resolves to its exit code and output.
+ * One that runs past `timeoutMs` is stopped, killed outright if it ignores that, and refused once it has exited.
+ */
 function run(args, { input = '', timeoutMs }) {
-  const bin = process.env.ALIQUOT_CLAUDE_BIN || 'claude';
+  const named = process.env.ALIQUOT_CLAUDE_BIN || 'claude';
+  const bin = named.includes('/') || named.includes(path.sep) ? path.resolve(named) : named;
   // A script path runs under this Node, so the tests' stand-in works on every platform.
   const [cmd, pre] = /\.m?js$/.test(bin) ? [process.execPath, [bin]] : [bin, []];
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, [...pre, ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(cmd, [...pre, ...args], { cwd: workDir(), stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
+    let killer = null;
     const timer = setTimeout(() => {
-      child.kill();
-      reject(unavailable(`Claude did not answer within ${Math.round(timeoutMs / 1000)} seconds.`));
+      timedOut = true;
+      child.kill('SIGTERM');
+      killer = setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS);
     }, timeoutMs);
     child.on('error', (e) => {
       clearTimeout(timer);
@@ -33,7 +52,9 @@ function run(args, { input = '', timeoutMs }) {
     child.stderr.on('data', (d) => { if (stderr.length < MAX_OUTPUT) stderr += d; });
     child.on('close', (code) => {
       clearTimeout(timer);
-      resolve({ code, stdout, stderr });
+      clearTimeout(killer);
+      if (timedOut) reject(unavailable(`Claude did not answer within ${Math.round(timeoutMs / 1000)} seconds.`));
+      else resolve({ code, stdout, stderr });
     });
     child.stdin.on('error', () => {});
     child.stdin.end(input);
@@ -85,7 +106,7 @@ export async function askClaude({ system, prompt, schema, model, effort }) {
       '-p', '--model', model, '--effort', effort,
       '--tools', '', '--no-session-persistence', '--setting-sources', '', '--strict-mcp-config',
       '--system-prompt', system, '--json-schema', JSON.stringify(schema), '--output-format', 'json',
-    ], { input: prompt, timeoutMs: ANSWER_TIMEOUT_MS });
+    ], { input: prompt, timeoutMs: Number(process.env.ALIQUOT_CLAUDE_TIMEOUT_MS) || ANSWER_TIMEOUT_MS });
     let reply;
     try {
       reply = JSON.parse(stdout);
