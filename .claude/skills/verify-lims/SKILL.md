@@ -16,7 +16,7 @@ Everything here uses the four helpers in `.claude/skills/verify-lims/scripts/`. 
 
 | Path | Holds | Cleanup |
 |---|---|---|
-| `.verify/runs/<run>/` | data folder, `server.log`, `seed.log`, `pid`, `base`, API cookies | deleted by `stop.sh` |
+| `.verify/runs/<run>/` | data folder, `server.log`, `seed.log`, `pid`, `base`, API cookies, `fake/` (the stand-in Claude's replies and call log) | deleted by `stop.sh` |
 | `.verify/evidence/<run>/` | screenshots and JSON read-backs | kept |
 
 `.verify/` is gitignored.
@@ -32,10 +32,22 @@ Never drive `data/` (the lab's real database) and never drive `data-dev/` behind
 `launch.sh`:
 
 1. Seeds the fictional demo lab into a fresh data folder with `scripts/seed-demo.js` (migrations run inside it, so an empty folder is enough).
-2. Starts `node server.js` with `PORT=0 HOST=127.0.0.1 ALIQUOT_DATA=.verify/runs/<run>/data`.
+2. Starts `node server.js` with `PORT=0 HOST=127.0.0.1 ALIQUOT_DATA=.verify/runs/<run>/data`, plus, unless `VERIFY_REAL_CLAUDE=1`, `ALIQUOT_CLAUDE_BIN=test/fake-claude.mjs FAKE_CLAUDE_DIR=.verify/runs/<run>/fake` (see **The stand-in Claude** below).
 3. Waits until `GET /api/setup` answers, then prints the base URL. Ready means the API answers with `needsSetup:false` and `demo:true`; `doctor.sh` checks both.
 
 It refuses to start if that run is already up. Server code is loaded once at launch, so relaunch after `server/` changes. A `public/` change only needs a browser reload. Node 22.13 or newer is required (`node:sqlite`).
+
+### The stand-in Claude
+
+The portal's submission assistant ([features/submission-assistant.md](features/submission-assistant.md)) runs the `claude` command on the server's computer. A run never reaches the real one by default: `launch.sh` points `ALIQUOT_CLAUDE_BIN` at `test/fake-claude.mjs` and `FAKE_CLAUDE_DIR` at `.verify/runs/<run>/fake/`, an empty folder you fill:
+
+- `replies.json`: a JSON array of answers to the assistant's calls, used in order; the last one repeats. Each is `{ "output": <the model's structured answer> }`, or `{ "raw": "<text>", "exit": 1 }` for what a broken CLI prints. Either may add `delay_ms` (the answer's wall time) and `ignore_term: true` (outlasts the server's stop signal, for timeout tests). The format is the comment at the top of `test/fake-claude.mjs`.
+- `calls.jsonl`: written by the fake. `auth status` adds one line; a draft call (`-p`) adds one line with its `pid` when it starts and one with its `input` (the prompt) when it answers. Count the lines holding `"input"` (`grep -c '"input"'`) to prove how many draft calls were answered, or that none were.
+- `signed-out`: create this empty file and `claude auth status` reports no account, so turning the assistant on is refused. Delete it to sign back in as `lab@example.com` (max plan).
+
+The fake reads the folder on every call, so change replies between turns without relaunching.
+
+Only with the user's explicit approval in this conversation, launch with `VERIFY_REAL_CLAUDE=1 .claude/skills/verify-lims/scripts/launch.sh <run>`. That run uses the computer's real `claude`: turning the assistant on binds the user's own Claude account and every draft spends its usage.
 
 Demo people all use password `demo1234`:
 
@@ -57,7 +69,7 @@ Run this first, and again whenever anything looks off:
 .claude/skills/verify-lims/scripts/doctor.sh verify
 ```
 
-Read-only. It checks that the recorded pid is alive and is `node server.js`, that the port is owned by that pid, that the server logs this run's data folder, and that the lab is set up with demo data. It prints the commit (`+dirty` when the tree has changes). Any `FAIL:` line means: stop, run cleanup, relaunch.
+Read-only. It checks that the recorded pid is alive and is `node server.js`, that the port is owned by that pid, that the server logs this run's data folder, and that the lab is set up with demo data. It prints the commit (`+dirty` when the tree has changes) and a `claude:` line: `fake (test/fake-claude.mjs, replies in …/fake)` on a normal run, `REAL claude: …` when the server can reach the real model. Stop if it says REAL and the user did not ask for that. Any `FAIL:` line means: stop, run cleanup, relaunch.
 
 ## Drive
 
@@ -87,12 +99,24 @@ agent-browser wait 2000 && agent-browser get title    # "Dashboard · Aliquot" w
 
 A wrong password keeps the modal open with `.modal .form-error`. Five failures lock the account for 15 minutes, and signature failures count toward the five; a locked signature returns 423.
 
-Toasts appear in `.toasts`: `agent-browser eval 'document.querySelector(".toasts")?.innerText'`. The Client portal uses a single `.toast`.
+Toasts appear in `.toasts`: `agent-browser eval 'document.querySelector(".toasts")?.textContent'`. The Client portal uses a single `.toast`. A success toast lasts 4.2 s; an error toast (`.toast.error`) lasts twice that, about 8.4 s (`toast()` in `public/js/core/ui.js`). While it is up it can cover the button you click next, and agent-browser refuses the click (proven live 2026-10-18 on the receive form). Before clicking after an error toast:
 
-**Let modals finish opening.** Every modal plays an opening animation, and a `mousedown` that lands on its backdrop closes it as Cancel. A click fired while the modal is still animating can hit the backdrop, so the dialog closes silently and nothing happens. The fading backdrop of a closing modal (`.modal-backdrop.out`) also blocks the next click for about 150 ms. Before any click on or just after a modal, wait for animations to settle:
+```bash
+agent-browser wait --fn '!document.querySelector(".toast.error")'
+```
+
+**Match text with `textContent`.** CSS `text-transform: uppercase` styles buttons, badges, tabs, card titles and the notebook's save state, so `innerText` returns "SAVED 03:59 AM", "REVIEWED", "SIGN & ISSUE" where the markup says "Saved 03:59 AM" (`agent-browser get text` likely does the same). A starts-with "Saved" check on `innerText` waited out its 25 s timeout on 2026-10-18. Use `textContent` for any text match, or compare case-insensitively.
+
+**Let modals finish opening.** Every modal plays an opening animation, and a `mousedown` that lands on its backdrop closes it as Cancel. A click fired while the modal is still animating can hit the backdrop, so the dialog closes silently and nothing happens. Before any click on a modal that just opened, wait for animations to settle:
 
 ```bash
 agent-browser wait --fn 'document.getAnimations().every(a=>a.playState!=="running")'
+```
+
+After a modal closes, that is not enough. The closing backdrop (`.modal-backdrop.out`) stays in the page for 150 ms on a timer (`setTimeout(() => backdrop.remove(), 150)` in `public/js/core/ui.js`), and under reduced motion its fade is already over, so animations read as settled while it still blocks clicks; it took the first click on the next page on 2026-10-18. Wait until it is gone:
+
+```bash
+agent-browser wait --fn '!document.querySelector(".modal-backdrop")'
 ```
 
 `agent-browser` exits 1 when a step fails. Chain steps with `&&` and stop on the first failure. Never let a later write probe run after an earlier step failed, because the probe then acts on a record in the wrong state.
@@ -103,7 +127,7 @@ agent-browser wait --fn 'document.getAnimations().every(a=>a.playState!=="runnin
 
 ```bash
 .claude/skills/verify-lims/scripts/api.mjs verify tom.fletcher GET '/api/tests?scope=open&work=assigned'
-.claude/skills/verify-lims/scripts/api.mjs verify daniel.okafor GET '/api/investigations?status=Open'
+.claude/skills/verify-lims/scripts/api.mjs verify daniel.okafor GET '/api/investigations?status=open'      # lowercase: every investigation not Closed
 .claude/skills/verify-lims/scripts/api.mjs verify daniel.okafor GET '/api/audit?q=OOS-2026-001&limit=10'   # audit.view: QA, manager, admin
 .claude/skills/verify-lims/scripts/api.mjs verify daniel.okafor GET /api/audit/verify                     # {ok:true, count}
 .claude/skills/verify-lims/scripts/api.mjs verify tom.fletcher POST /api/investigations/<id>/close '{"password":"demo1234"}'   # expect 403
@@ -140,4 +164,4 @@ Proof standards:
 
 ## Feature map
 
-`features/README.md` indexes one file per user-facing feature, each with routes, real selectors, end state and gotchas. A proof of a feature covers every entry point its file lists, not just the most convenient one. Each gotcha says which kind it is: an app bug links its issue in the v3 repo, a harness quirk names the evidence for its cause, and an unproven cause is marked as a hypothesis. Keep the map honest with `/maintain-verification-skill`.
+`features/README.md` indexes one file per user-facing feature, each with routes, real selectors, end state and gotchas. A proof of a feature covers every entry point its file lists, not just the most convenient one. Each gotcha opens with its kind in bold: **App bug** links its issue in the v3 repo, **Behavior** (the app works as built, and the gotcha says how to drive it) cites the code that does it, **Harness quirk** names the evidence for its cause, and **Hypothesis** marks an unproven cause. Keep the map honest with `/maintain-verification-skill`.

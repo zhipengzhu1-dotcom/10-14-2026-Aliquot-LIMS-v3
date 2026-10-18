@@ -13,7 +13,13 @@ if [[ -f "$RUN/pid" ]] && kill -0 "$(cat "$RUN/pid")" 2>/dev/null; then
   exit 1
 fi
 rm -rf "$RUN"
-mkdir -p "$RUN/data" "$EVIDENCE"
+mkdir -p "$RUN/data" "$RUN/fake" "$EVIDENCE"
+
+# The submission assistant runs on the stand-in Claude unless the caller opts in to the real one, so a verification
+# run never binds the computer's Claude account or spends its usage.
+if [[ "${VERIFY_REAL_CLAUDE:-}" != 1 ]]; then
+  export ALIQUOT_CLAUDE_BIN="$ROOT/test/fake-claude.mjs" FAKE_CLAUDE_DIR="$RUN/fake"
+fi
 
 ALIQUOT_DATA="$RUN/data" node "$ROOT/scripts/seed-demo.js" >"$RUN/seed.log" 2>&1 || { cat "$RUN/seed.log" >&2; exit 1; }
 

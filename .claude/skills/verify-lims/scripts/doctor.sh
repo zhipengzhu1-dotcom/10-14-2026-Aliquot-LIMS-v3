@@ -18,5 +18,7 @@ grep -q "Data folder: *$RUN/data" "$RUN/server.log" || fail "server is not using
 SETUP=$(curl -fsS "$BASE/api/setup") || fail "$BASE/api/setup does not answer"
 echo "$SETUP" | grep -q '"needsSetup":false' || fail "lab is not set up: $SETUP"
 echo "$SETUP" | grep -q '"demo":true' || fail "demo lab not loaded: $SETUP"
+if ps eww -o command= -p "$PID" | grep -qF "ALIQUOT_CLAUDE_BIN=$ROOT/test/fake-claude.mjs"; then CLAUDE="fake (test/fake-claude.mjs, replies in $RUN/fake)"; else CLAUDE="REAL claude: this run can reach the model and the computer's Claude account"; fi
 echo "OK  run=$NAME pid=$PID base=$BASE commit=$(git -C "$ROOT" rev-parse --short HEAD)$(git -C "$ROOT" diff --quiet || echo '+dirty')"
+echo "    claude: $CLAUDE"
 echo "    server started from the working tree at launch; relaunch after server/ changes (public/ changes need only a reload)"
