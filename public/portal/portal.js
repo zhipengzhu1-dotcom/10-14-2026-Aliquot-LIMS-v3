@@ -881,9 +881,9 @@ function sendHtml() {
 function messageHtml(m, i) {
   if (m.role === 'note') return html`<div class="msg system"><div class="bubble">${m.text}</div></div>`;
   if (m.role === 'client') return html`<div class="msg client"><div class="meta">You</div><div class="bubble">${m.text}</div></div>`;
-  return html`<div class="msg lab as-reply"><div class="meta">Assistant${m.meta ? html` · <span class="js-answered-by">${m.meta}</span>` : ''}</div><div class="bubble">${m.text}
+  return html`<div class="msg lab as-reply"><div class="meta">Assistant${m.meta ? html` · <span class="js-answered-by">${m.meta}</span>` : ''}</div><div class="bubble"><span class="as-text">${m.text}</span>
     ${m.unresolved?.length ? html`<div class="as-q"><b>Still open after ${plural(m.attempts, 'try', 'tries')}:</b> ${m.unresolved.map((p) => p.message).join('; ')}</div>` : ''}
-    ${(m.questions ?? []).map((q, qi) => html`<div class="as-q"><b>${q.text}</b>${q.options.length ? html`<div class="as-choices">${q.options.map((o) => html`<button class="as-choice" type="button" data-answer="${`${i}:${qi}`}" data-value="${o}" ${q.answered ? raw('disabled') : ''} aria-pressed="${q.answered === o}">${o}</button>`)}</div>` : ''}</div>`)}</div></div>`;
+    ${(m.questions ?? []).map((q, qi) => html`<div class="as-q"><b>${q.text}</b>${q.options.length ? html`<div class="as-choices">${q.options.map((o) => html`<button class="as-choice" type="button" data-answer="${`${i}:${qi}`}" data-value="${o}" ${q.answered ? raw('disabled') : ''} aria-pressed="${String(q.answered === o)}">${o}</button>`)}</div>` : ''}</div>`)}</div></div>`;
 }
 
 function chatHtml() {

@@ -639,7 +639,8 @@ form.card { counter-reset: step; }
 @media (min-width: 720px) { .as-pick { min-height: 32px; font-size: 11px; } }
 .as-thread { max-height: 62vh; min-height: 240px; }
 @media (max-width: 899px) { .as-thread { max-height: none; } }
-.as-reply .bubble { box-shadow: inset 3px 0 0 var(--lime); }
+.as-reply .bubble { box-shadow: inset 3px 0 0 var(--lime); white-space: normal; }
+.as-text { white-space: pre-wrap; }
 .as-q { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line-strong); white-space: normal; }
 .as-q b { display: block; margin-bottom: 6px; font-weight: 650; }
 .as-choices { display: flex; flex-wrap: wrap; gap: 6px; }
