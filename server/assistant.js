@@ -171,7 +171,7 @@ export function readModelDraft(output, { previous, clientWords }) {
     const before = previous.provenance[path];
     const unchanged = same(getPath(previous, path), value);
     let p = unchanged && ['edited', 'fixed'].includes(before?.source) ? before
-      : claims.get(path) ?? (unchanged && before) ?? { source: 'guessed', reason: 'Filled in without saying where it came from.' };
+      : claims.get(path) ?? (unchanged ? before : undefined) ?? { source: 'guessed', reason: 'Filled in without saying where it came from.' };
     if (MUST_CONFIRM.includes(path) && ['client', 'sheet'].includes(p.source) && !words.includes(String(value).toLowerCase())) {
       p = { source: 'guessed', reason: p.reason ?? 'Read from your words rather than copied from them.' };
     }

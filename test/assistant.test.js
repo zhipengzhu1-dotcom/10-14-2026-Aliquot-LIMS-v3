@@ -129,7 +129,7 @@ test('a turn drafts from the client’s words: the gate fixes what it can, guess
   const [assay] = methods;
   fake([answer({
     sample_type: 'Drug Product', storage: 'Refrigerated (2-8 °C)', courier: 'FedEx', tracking_no: '778911230045', ship_date: '2026-10-20',
-    method_ids: [assay.id, closedMethod], samples: [row('LOT-2291'), row('LOT-2292')],
+    method_ids: [assay.id, closedMethod], samples: [row('LOT-2291'), row('LOT-2292', { container: 'HDPE bottle' })],
   }, {
     reply: 'I drafted 2 samples. Which project is this for?',
     provenance: [
@@ -158,7 +158,7 @@ test('a turn drafts from the client’s words: the gate fixes what it can, guess
     draft: {
       project_id: null, sample_type: 'Drug Product', priority: 'One week', storage: 'Refrigerated (2–8 °C)', courier: 'FedEx', tracking_no: '778911230045',
       ship_date: '2026-10-20', notes: null, method_ids: [assay.id],
-      samples: [row('LOT-2291', { priority: null }), row('LOT-2292', { priority: null })],
+      samples: [row('LOT-2291', { priority: null }), row('LOT-2292', { priority: null, container: 'HDPE bottle' })],
       provenance: {
         sample_type: { source: 'guessed', reason: 'Tablets are a drug product.' },
         priority: { source: 'default' },
@@ -169,6 +169,7 @@ test('a turn drafts from the client’s words: the gate fixes what it can, guess
         method_ids: { source: 'fixed', reason: 'One of the selected tests is not available, so it was taken off.' },
         'samples.0.description': { source: 'client' }, 'samples.0.batch_no': { source: 'client' }, 'samples.0.stage': stage,
         'samples.1.description': { source: 'client' }, 'samples.1.batch_no': { source: 'client' }, 'samples.1.stage': stage,
+        'samples.1.container': { source: 'guessed', reason: 'Filled in without saying where it came from.' },
       },
       questions: [{ path: 'project_id', text: 'Which project is this for?', options: ['None'] }],
     },
