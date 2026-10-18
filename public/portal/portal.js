@@ -702,11 +702,12 @@ const TABLE_FIELDS = ['batch_no', 'description', 'stage', 'priority', 'quantity'
 const TABLE_MIN = 560;
 const GREETING = 'Paste the shipping email or packing list, or attach your spreadsheet. I fill in the submission and mark what I checked and what I guessed. Nothing goes to the lab until you press Send to lab.';
 
-// A row's id says which sample it is when the assistant adds, drops or reorders rows; it never reaches the lab.
+// A row's id says which sample it is when the assistant adds, drops or reorders rows; it never reaches the lab. The
+// browser and the server both take new ids from the draft's next_row and only count up, so no id comes back.
 const blankRow = (id) => ({ id, description: null, product_code: null, batch_no: null, client_ref: null, quantity: null, container: null, stage: null, priority: null, details: [] });
 const blankDraft = (lk) => ({
   project_id: null, sample_type: null, priority: lk.defaultPriority, storage: null, courier: null, tracking_no: null, ship_date: null, notes: null,
-  method_ids: [], samples: [blankRow('r1')], provenance: { priority: { source: 'default' } }, questions: [],
+  method_ids: [], samples: [blankRow('r1')], next_row: 2, provenance: { priority: { source: 'default' } }, questions: [],
 });
 const getAt = (o, path) => path.split('.').reduce((a, k) => a?.[k], o);
 function setAt(o, path, value) {
@@ -714,7 +715,7 @@ function setAt(o, path, value) {
   const last = keys.pop();
   keys.reduce((a, k) => a[k], o)[last] = value;
 }
-const bodyOf = ({ provenance, questions, ...body }) => ({ ...body, samples: body.samples.map(({ id, ...row }) => row) });
+const bodyOf = ({ provenance, questions, next_row, ...body }) => ({ ...body, samples: body.samples.map(({ id, ...row }) => row) });
 const fid = (path) => `d-${path.replace(/\./g, '-')}`;
 const choiceLabel = (models, model, effort) => `${models.find((m) => m.id === model)?.label ?? model} · ${effort} effort`;
 
@@ -723,7 +724,7 @@ let desk = null;
 
 function newDesk(lk, assistant) {
   return {
-    lk, assistant, draft: blankDraft(lk), gate: null, checking: false, busy: false, tab: 'chat', table: false, lastRow: 1, declined: [],
+    lk, assistant, draft: blankDraft(lk), gate: null, checking: false, busy: false, tab: 'chat', table: false, declined: [],
     choice: assistant.enabled ? { model: assistant.model, effort: assistant.effort } : null,
     messages: assistant.enabled ? [{ role: 'assistant', text: GREETING }] : [],
   };
@@ -731,8 +732,7 @@ function newDesk(lk, assistant) {
 
 /** An id no row of this conversation had. */
 function newRow() {
-  desk.lastRow = Math.max(desk.lastRow, ...[...desk.draft.samples, ...desk.declined].map((r) => Number((r.id ?? r.row)?.slice(1)) || 0)) + 1;
-  return blankRow(`r${desk.lastRow}`);
+  return blankRow(`r${desk.draft.next_row++}`);
 }
 
 const rowLabel = (path) => {
@@ -893,7 +893,7 @@ function messageHtml(m, i) {
   if (m.role === 'client') return html`<div class="msg client"><div class="meta">You</div><div class="bubble">${m.text}</div></div>`;
   return html`<div class="msg lab as-reply"><div class="meta">Assistant${m.meta ? html` · <span class="js-answered-by">${m.meta}</span>` : ''}</div><div class="bubble"><span class="as-text">${m.text}</span>
     ${m.unresolved?.length ? html`<div class="as-q"><b>Still open after ${plural(m.attempts, 'try', 'tries')}:</b> ${m.unresolved.map((p) => p.message).join('; ')}</div>` : ''}
-    ${(m.questions ?? []).map((q, qi) => html`<div class="as-q"><b>${q.text}</b>${q.options.length ? html`<div class="as-choices">${q.options.map((o) => html`<button class="as-choice" type="button" data-answer="${`${i}:${qi}`}" data-value="${o}" ${q.answered || desk.busy ? raw('disabled') : ''} aria-pressed="${String(q.answered === o)}">${o}</button>`)}</div>` : ''}</div>`)}</div></div>`;
+    ${(m.questions ?? []).map((q, qi) => html`<div class="as-q"><b>${q.text}</b>${q.options.length ? html`<div class="as-choices">${q.options.map((o, oi) => html`<button class="as-choice" type="button" data-answer="${`${i}:${qi}:${oi}`}" data-value="${o}" ${q.answered || q.retired || desk.busy ? raw('disabled') : ''} aria-pressed="${String(q.answered === o)}">${o}</button>`)}</div>` : ''}${q.retired ? html`<div class="small muted as-retired">${q.retired}</div>` : ''}</div>`)}</div></div>`;
 }
 
 function chatHtml() {
@@ -1065,6 +1065,8 @@ function mountDesk(root) {
       const res = await post('/assistant', { message: text, draft: desk.draft, history: before, declined: desk.declined, ...desk.choice });
       const editedMeanwhile = desk.touched.size > 0;
       desk.draft = keepTouched(res.draft);
+      // A proposal belongs to the turn that asked it; the new reply asks again whatever is still open.
+      for (const q of desk.messages.flatMap((msg) => msg.questions ?? [])) if (q.proposal && !q.answered) q.retired = 'Replaced by the newer reply.';
       desk.gate = editedMeanwhile ? null : res.gate;
       desk.messages.push({
         role: 'assistant', text: res.reply, questions: res.draft.questions, attempts: res.attempts, unresolved: res.unresolved,
@@ -1103,21 +1105,28 @@ function mountDesk(root) {
   $in('.js-chat').addEventListener('click', (e) => {
     const b = e.target.closest('[data-answer]');
     if (!b || b.disabled || desk.busy) return;
-    const [mi, qi] = b.dataset.answer.split(':').map(Number);
+    const [mi, qi, oi] = b.dataset.answer.split(':').map(Number);
     const q = desk.messages[mi].questions[qi];
-    q.answered = b.dataset.value;
+    if (q.answered || q.retired) return;
     if (!q.proposal) {
+      q.answered = b.dataset.value;
       ask(b.dataset.value);
       return;
     }
     // A change to a value the client set is theirs to take or turn down, here, without another turn of the model.
     const { row, field, value } = q.proposal;
     const i = row ? desk.draft.samples.findIndex((r) => r.id === row) : -1;
-    const path = row ? (i < 0 ? null : `samples.${i}.${field}`) : field;
-    if (b.dataset.value === q.options[0] && path) {
+    if (row && i < 0) {
+      q.retired = 'That sample is no longer in the draft.';
+      renderChat();
+      return;
+    }
+    q.answered = b.dataset.value;
+    const path = row ? `samples.${i}.${field}` : field;
+    if (oi === 0) {
       setAt(desk.draft, path, structuredClone(value));
       mark(path, 'edited', 'You took the assistant’s suggestion.');
-    } else if (b.dataset.value !== q.options[0]) {
+    } else {
       desk.declined.push(q.proposal);
     }
     renderChat();

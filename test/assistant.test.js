@@ -163,6 +163,7 @@ test('a turn drafts from the client’s words: the gate fixes what it can, guess
       project_id: null, sample_type: 'Drug Product', priority: 'One week', storage: 'Refrigerated (2–8 °C)', courier: 'FedEx', tracking_no: '778911230045',
       ship_date: '2026-10-20', notes: null, method_ids: [assay.id],
       samples: [row('LOT-2291', { id: 'r1', priority: null }), row('LOT-2292', { id: 'r2', priority: null, container: 'HDPE bottle' })],
+      next_row: 3,
       provenance: {
         sample_type: { source: 'guessed', reason: 'Tablets are a drug product.' },
         priority: { source: 'default' },

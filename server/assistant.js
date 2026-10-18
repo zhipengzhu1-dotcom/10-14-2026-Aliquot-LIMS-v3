@@ -117,18 +117,29 @@ const same = (a, b) => JSON.stringify(canonical(a)) === JSON.stringify(canonical
 const ROW_ID = /^r\d{1,9}$/;
 const rowId = (v) => (typeof v === 'string' && ROW_ID.test(v) ? v : null);
 
+const MAX_ROW = 999_999_999;
+
 /**
- * Every row with an id: its own when `known` holds it and no earlier row took it, otherwise one no row in this
- * conversation had. An id the model made up is a new row, never someone else's.
+ * The number of the next row id to give, from the conversation's counter the browser sends (`next_row`), never at or
+ * below an id in `ids`. Both sides only count up from it, so no id is given twice, even after the client removes its row.
  */
-function identify(samples, known, seen) {
-  let last = Math.max(0, ...[...known, ...seen].map((id) => Number(id.slice(1))));
+const nextRow = (claimed, ids) => Math.max(
+  Number.isInteger(claimed) && claimed > 0 && claimed <= MAX_ROW ? claimed : 1,
+  ...ids.map((id) => Number(id.slice(1)) + 1),
+);
+
+/**
+ * Every row with an id: its own when `known` holds it and no earlier row took it, otherwise the next from the counter.
+ * An id the model made up is a new row, never someone else's.
+ */
+function identify(samples, known, next) {
   const used = new Set();
-  return samples.map((s) => {
-    const id = s.id && known.has(s.id) && !used.has(s.id) ? s.id : `r${++last}`;
+  const rows = samples.map((s) => {
+    const id = s.id && known.has(s.id) && !used.has(s.id) ? s.id : `r${next++}`;
     used.add(id);
     return { ...s, id };
   });
+  return { samples: rows, next_row: next };
 }
 
 const ROW_PATH = /^samples\.(\d+)\.(\w+)$/;
@@ -148,7 +159,7 @@ function pathOf(draft, at) {
 }
 
 /** The submission itself, without the row ids only the draft needs. */
-const submission = (draft) => ({ ...draft, samples: draft.samples.map(({ id, ...row }) => row) });
+const submission = ({ next_row, ...draft }) => ({ ...draft, samples: draft.samples.map(({ id, ...row }) => row) });
 
 /** The submission fields of `raw`, every other key dropped: the shape the gate and the browser share. */
 function readBody(raw) {
@@ -175,40 +186,56 @@ const readProvenance = (raw, sources) => Object.fromEntries(Object.entries(isObj
   .filter(([, p]) => isObject(p) && sources.includes(p.source))
   .map(([path, p]) => [path, { source: p.source, ...(text(p.reason, 500) ? { reason: text(p.reason, 500) } : {}) }]));
 
-const readQuestions = (raw) => (Array.isArray(raw) ? raw : []).filter((q) => isObject(q) && text(q.text)).slice(0, 5).map((q) => ({
-  path: text(q.path, 200) ?? '',
-  text: text(q.text, 500),
-  options: (Array.isArray(q.options) ? q.options : []).map((o) => text(o, 200)).filter(Boolean).slice(0, 6),
-}));
+const FIELDS = { shipment: ['project_id', ...SHIPMENT_TEXT, 'method_ids'], row: [...ROW_TEXT, 'details'] };
 
-/**
- * A draft as the browser sends it: the body with an id on every row, provenance in any of the six sources, and the open
- * questions. A field the client emptied by hand keeps its `edited` mark, so the model cannot fill it unasked.
- */
-export function readClientDraft(raw, { seen = [] } = {}) {
-  const src = isObject(raw) ? raw : {};
-  const body = readBody(src);
-  body.samples = identify(body.samples, new Set(body.samples.map((s) => s.id).filter(Boolean)), seen);
-  const claimed = readProvenance(src.provenance, SOURCES);
-  const kept = allPaths(body).filter((p) => claimed[p] && (filled(getPath(body, p)) || claimed[p].source === 'edited'));
-  return { ...body, provenance: Object.fromEntries(kept.map((p) => [p, claimed[p]])), questions: readQuestions(src.questions) };
+/** A change to one value: a row id or null, a field of that row or of the shipment, the value. Null when it is not one. */
+function readProposal(raw) {
+  if (!isObject(raw)) return null;
+  const row = rowId(raw.row);
+  const field = text(raw.field, 40);
+  const value = raw.value ?? null;
+  if (!FIELDS[row ? 'row' : 'shipment'].includes(field) || JSON.stringify(value).length > 6000) return null;
+  return { row, field, value };
 }
 
-/** The proposals the client turned down with "Keep what I set" in this conversation: a row id or null, the field, the value. */
-const readDeclined = (raw) => (Array.isArray(raw) ? raw : []).filter(isObject).slice(0, 200).map((d) => ({
-  row: rowId(d.row), field: text(d.field, 40), value: JSON.stringify(d.value ?? null).length <= 6000 ? d.value ?? null : undefined,
-})).filter((d) => d.field && d.value !== undefined);
+/** Open questions. Only the client's draft may bring back the `proposal` of a question the server asked; the model's never do. */
+const readQuestions = (raw, { max = 5, proposals = false } = {}) => (Array.isArray(raw) ? raw : []).filter((q) => isObject(q) && text(q.text)).slice(0, max).map((q) => {
+  const proposal = proposals && readProposal(q.proposal);
+  return {
+    path: text(q.path, 200) ?? '',
+    text: text(q.text, 500),
+    options: (Array.isArray(q.options) ? q.options : []).map((o) => text(o, 200)).filter(Boolean).slice(0, 6),
+    ...(proposal ? { proposal } : {}),
+  };
+});
+
+/**
+ * A draft as the browser sends it: the body with an id on every row, the conversation's row counter, provenance in any
+ * of the six sources, and the open questions. The counter starts above every id in the draft and in `declined`. A field
+ * the client emptied by hand keeps its `edited` mark, so the model cannot fill it unasked.
+ */
+export function readClientDraft(raw, { declined = [] } = {}) {
+  const src = isObject(raw) ? raw : {};
+  const body = readBody(src);
+  const ids = body.samples.map((s) => s.id).filter(Boolean);
+  Object.assign(body, identify(body.samples, new Set(ids), nextRow(src.next_row, [...ids, ...declined.map((d) => d.row).filter(Boolean)])));
+  const claimed = readProvenance(src.provenance, SOURCES);
+  const kept = allPaths(body).filter((p) => claimed[p] && (filled(getPath(body, p)) || claimed[p].source === 'edited'));
+  return { ...body, provenance: Object.fromEntries(kept.map((p) => [p, claimed[p]])), questions: readQuestions(src.questions, { max: 200, proposals: true }) };
+}
+
+/** The proposals the client turned down with "Keep what I set" in this conversation. */
+const readDeclined = (raw) => (Array.isArray(raw) ? raw : []).slice(0, 200).map(readProposal).filter(Boolean);
 
 /**
  * The model's answer as a draft, or null when it is not one. A row is the same row as before only by its id. A value
  * keeps the client's `edited` or the gate's `fixed` while it is unchanged; a value without a provenance the model claimed
  * counts as guessed; storage and ship date stay guessed unless the client's own words hold the value.
  */
-export function readModelDraft(output, { previous, clientWords, seen = [] }) {
+export function readModelDraft(output, { previous, clientWords }) {
   if (!isObject(output) || !isObject(output.draft)) return null;
   const body = readBody(output.draft);
-  const known = new Set(previous.samples.map((s) => s.id));
-  body.samples = identify(body.samples, known, seen);
+  Object.assign(body, identify(body.samples, new Set(previous.samples.map((s) => s.id)), previous.next_row));
   const claims = new Map((Array.isArray(output.provenance) ? output.provenance : [])
     .filter((p) => isObject(p) && typeof p.path === 'string' && MODEL_SOURCES.includes(p.source))
     .map((p) => [p.path, { source: p.source, ...(text(p.reason, 500) ? { reason: text(p.reason, 500) } : {}) }]));
@@ -258,17 +285,34 @@ function valueText(context, path, v) {
 const brief = (s, max = 60) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 const KEEP = 'Keep what I set';
 
+/** The question offering `theirs` in place of the client's `mine` at `path`: its first option takes it, the second keeps the client's. */
+function proposalAsk(context, path, at, mine, theirs) {
+  const was = brief(valueText(context, path, mine));
+  const proposed = valueText(context, path, theirs);
+  const take = proposed ? brief(proposed, 40) : 'Clear it';
+  return {
+    path,
+    text: !proposed ? `You set ${fieldName(path)} to "${was}". Clear it?`
+      : !was ? `You emptied ${fieldName(path)}. Set it to "${proposed}"?`
+        : `You set ${fieldName(path)} to "${was}". Change it to "${proposed}"?`,
+    options: [take === KEEP ? 'Change it' : take, KEEP],
+    proposal: { ...at, value: canonical(theirs) },
+  };
+}
+
 /**
  * What the client set by hand is never changed by the model. Rows are matched by id, never by position: a row the client
  * edited that the reply left out goes back where it was, with a question. For each `edited` value the reply changed, the
  * client's value stays and the change comes back as a question whose first option takes it (its `proposal`), unless the
- * client already declined that same value for that field in this conversation.
+ * client already declined that same value for that field in this conversation. The browser retires a turn's questions
+ * when the next reply arrives, so a proposal the client left unanswered is asked again while its row is in the draft.
  */
 function keepEdits(draft, previous, { context, declined }) {
   const next = structuredClone(draft);
   const edits = Object.entries(previous.provenance).filter(([, p]) => p.source === 'edited');
   const asks = [];
   const held = new Set();
+  const turnedDown = (at, value) => declined.some((d) => d.row === at.row && d.field === at.field && same(d.value, value));
   const lost = previous.samples.map((row, i) => ({ row, i }))
     .filter(({ row, i }) => !next.samples.some((s) => s.id === row.id) && edits.some(([path]) => path.startsWith(`samples.${i}.`)));
   if (lost.length) {
@@ -294,17 +338,17 @@ function keepEdits(draft, previous, { context, declined }) {
     setPath(next, here, structuredClone(mine));
     if (same(mine, theirs)) continue;
     held.add(here);
-    if (declined.some((d) => d.row === at.row && d.field === at.field && same(d.value, theirs))) continue;
-    const was = brief(valueText(context, path, mine));
-    const proposed = valueText(context, path, theirs);
-    asks.push({
-      path: here,
-      text: !proposed ? `You set ${fieldName(here)} to "${was}". Clear it?`
-        : !was ? `You emptied ${fieldName(here)}. Set it to "${proposed}"?`
-          : `You set ${fieldName(here)} to "${was}". Change it to "${proposed}"?`,
-      options: [proposed ? brief(proposed, 40) : 'Clear it', KEEP],
-      proposal: { ...at, value: canonical(theirs) },
-    });
+    if (!turnedDown(at, theirs)) asks.push(proposalAsk(context, here, at, mine, theirs));
+  }
+  for (const { proposal } of previous.questions) {
+    if (!proposal) continue;
+    const { value, ...at } = proposal;
+    const here = pathOf(next, at);
+    if (!here || held.has(here) || next.provenance[here]?.source !== 'edited') continue;
+    const mine = getPath(next, here);
+    if (same(mine, value) || turnedDown(at, value)) continue;
+    held.add(here);
+    asks.push(proposalAsk(context, here, at, mine, value));
   }
   next.questions = [...next.questions.filter((q) => !held.has(q.path)), ...asks];
   return next;
@@ -396,7 +440,7 @@ const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
 
 /** The prompt for one try: the client's choices, the draft so far, the conversation, the new message, and what failed last time. */
 export function draftPrompt({ context, draft, history, message, problems, date = today() }) {
-  const { provenance, questions, ...body } = draft;
+  const { provenance, questions, next_row, ...body } = draft;
   const choices = {
     sample_types: SAMPLE_TYPES, storage_conditions: STORAGE_CONDITIONS, stages: STAGES, turnarounds: PRIORITIES, default_turnaround: DEFAULT_PRIORITY,
     projects: context.projects.map(({ id, code, title }) => ({ id, code: data(code), title: data(title) })),
@@ -428,8 +472,7 @@ export async function draftSubmission(pu, input, { model: chosen, effort }) {
   if (message.length > MAX_MESSAGE) throw bad(`That message is too long (max ${MAX_MESSAGE} characters)`);
   const context = submissionContext(pu.client_id);
   const declined = readDeclined(input.declined);
-  const seen = declined.map((d) => d.row).filter(Boolean);
-  const previous = readClientDraft(input.draft, { seen });
+  const previous = readClientDraft(input.draft, { declined });
   const history = readHistory(input.history);
   const clientWords = [message, ...history.filter((h) => h.role === 'client').map((h) => h.text)].join('\n');
   const started = Date.now();
@@ -441,7 +484,7 @@ export async function draftSubmission(pu, input, { model: chosen, effort }) {
     attempts++;
     const answer = await askClaude({ system: SYSTEM, prompt: draftPrompt({ context, draft: previous, history, message, problems }), schema: DRAFT_SCHEMA, model: chosen, effort });
     model = answer.model;
-    const read = readModelDraft(answer.output, { previous, clientWords, seen });
+    const read = readModelDraft(answer.output, { previous, clientWords });
     if (!read) {
       problems = [{ path: '', rule: 'output', message: 'Your answer was not a draft in the shape asked for' }];
       continue;
