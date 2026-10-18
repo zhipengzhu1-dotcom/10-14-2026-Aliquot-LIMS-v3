@@ -2,15 +2,13 @@
 // table of rules over a client's context and the submission body, saving nothing. submitSamples refuses the first
 // problem; the dry run and the assistant read them all.
 
-import { all, ph } from './db.js';
+import { all, get, ph } from './db.js';
 import { cleanAll, idList } from './util.js';
 import { SAMPLE_TYPES, STORAGE_CONDITIONS, PRIORITIES, DEFAULT_PRIORITY, PROJECT_OPEN } from './lookups.js';
 import { checkSampleRows } from './routes/lab.js';
 
-// The Project is checked against the client's open Projects by the gate, which gives the same answer for one that does
-// not exist, so the field itself only has to be an id.
 export const submissionSchema = {
-  project_id: { type: 'id', label: 'project' },
+  project_id: { type: 'id', ref: 'projects', label: 'project' },
   sample_type: { type: 'enum', values: SAMPLE_TYPES },
   priority: { type: 'enum', values: PRIORITIES, default: DEFAULT_PRIORITY },
   storage: { type: 'enum', values: STORAGE_CONDITIONS },
@@ -42,15 +40,17 @@ const projectId = (v) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(
 // The order is the order a submission is refused in.
 export const SUBMISSION_GATE = [
   {
+    rule: 'shipment-field',
+    check: (_, b) => cleanAll(b, submissionSchema).problems.map(({ key, ...p }) => ({ path: key, ...p })),
+  },
+  // A Project that does not exist is already the field's problem, so this one only answers for one that does.
+  {
     rule: 'project-open',
     check: ({ projects }, b) => {
       const id = projectId(b.project_id);
-      return id && !projects.some((p) => p.id === id) ? [{ path: 'project_id', message: 'Project not found' }] : [];
+      const refused = id && !projects.some((p) => p.id === id) && get('SELECT 1 FROM projects WHERE id = ?', id);
+      return refused ? [{ path: 'project_id', message: 'Project not found' }] : [];
     },
-  },
-  {
-    rule: 'shipment-field',
-    check: (_, b) => cleanAll(b, submissionSchema).problems.map(({ key, ...p }) => ({ path: key, ...p })),
   },
   {
     rule: 'sample-rows',
