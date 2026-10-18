@@ -425,6 +425,12 @@ test('what the model asked the client about is left to the client, not retried',
   assert.deepEqual([turn.attempts, turn.gate, turn.unresolved], [1, { ok: false, problems: [{ rule: 'sample-count', path: 'samples', message: 'Add at least one sample' }] }, []]);
 });
 
+test('a greeting with no samples yet is answered once, not retried for samples the client has not named', async () => {
+  fake([answer({}, { reply: 'Hi, paste your shipping email or attach your sheet.' })]);
+  const turn = await laura.ok('POST', '/api/portal/assistant', { message: 'hi' });
+  assert.deepEqual([turn.attempts, turn.reply, turn.unresolved, prompts().length], [1, 'Hi, paste your shipping email or attach your sheet.', [], 1]);
+});
+
 test('after three failed tries the draft comes back unchanged with what failed', async () => {
   fake([answer({ storage: 'Cold' })]);
   const draft = { samples: [{ description: 'Kept by hand' }], provenance: { 'samples.0.description': { source: 'edited' } } };
