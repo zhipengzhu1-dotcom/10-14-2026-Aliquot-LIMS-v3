@@ -80,16 +80,18 @@ test('a draft gets every problem at its path, from the checks the real submissio
   assert.deepEqual(check, {
     ok: false,
     problems: [
-      { rule: 'project-open', path: 'project_id', message: 'Project not found' },
       { rule: 'shipment-field', path: 'storage', message: `Storage must be one of: ${STORAGE}`, fix: { value: 'Refrigerated (2–8 °C)' } },
       { rule: 'shipment-field', path: 'ship_date', message: 'Ship date must be a valid date' },
+      { rule: 'project-open', path: 'project_id', message: 'Project not found' },
       { rule: 'sample-field', path: 'samples.0.description', message: 'Sample 1 description is required' },
       { rule: 'sample-field', path: 'samples.2.stage', message: `Sample 2 stage must be one of: ${STAGES}`, fix: { value: 'Stability' } },
       { rule: 'tests-on-contract', path: 'method_ids', message: 'One of the selected tests is not available', fix: { value: [assay] } },
     ],
   });
   const sent = await laura.req('POST', '/api/portal/submissions', draft);
-  assert.deepEqual([sent.status, sent.data.error], [400, 'Project not found'], 'the real submission refuses the first problem the dry run lists');
+  assert.deepEqual([sent.status, sent.data.error], [400, `Storage must be one of: ${STORAGE}`], 'the real submission refuses the first problem the dry run lists');
+  const missing = await laura.ok('POST', '/api/portal/submissions/check', { project_id: 999999, samples: [{ description: 'a' }] });
+  assert.deepEqual(missing.problems, [{ rule: 'shipment-field', path: 'project_id', message: 'Project not found' }], 'a Project that does not exist is listed once, by its field');
   assert.equal(await submissionCount(), before, 'neither the dry run nor the refused submission saved anything');
 });
 
