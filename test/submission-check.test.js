@@ -113,3 +113,15 @@ test('an empty draft is told to add a sample, and the dry run is the signed-in c
   assert.equal((await session(server.base).req('POST', '/api/portal/submissions/check', {})).status, 401, 'no portal session');
   assert.equal((await manager.req('POST', '/api/portal/submissions/check', {})).status, 401, 'a staff session is not a portal session');
 });
+
+test('the body the submission desk sends, every field present and blank rows left in, checks and submits as typed', async () => {
+  const blank = { description: null, product_code: null, batch_no: null, client_ref: null, quantity: null, container: null, stage: null, priority: null, details: [] };
+  const body = {
+    project_id: null, sample_type: null, priority: 'One week', storage: 'Refrigerated (2–8 °C)', courier: 'FedEx', tracking_no: '7789 1123 0045', ship_date: '2026-10-20', notes: null,
+    method_ids: [], samples: [blank, { ...blank, description: 'Paracetamol 500 mg tablet', batch_no: 'LOT-2291', stage: 'Finished product' }, blank],
+  };
+  assert.deepEqual(await laura.ok('POST', '/api/portal/submissions/check', body), { ok: true, problems: [] });
+  const sub = await laura.ok('POST', '/api/portal/submissions', body);
+  const saved = (await laura.ok('GET', `/api/portal/submissions/${sub.id}`)).submission;
+  assert.deepEqual([saved.samples.length, saved.samples[0].batch_no, saved.samples[0].priority, saved.storage, saved.tracking_no], [1, 'LOT-2291', null, 'Refrigerated (2–8 °C)', '7789 1123 0045']);
+});
