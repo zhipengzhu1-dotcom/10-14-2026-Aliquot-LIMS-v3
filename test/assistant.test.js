@@ -162,7 +162,8 @@ test('a turn drafts from the client’s words: the gate fixes what it can, guess
     draft: {
       project_id: null, sample_type: 'Drug Product', priority: 'One week', storage: 'Refrigerated (2–8 °C)', courier: 'FedEx', tracking_no: '778911230045',
       ship_date: '2026-10-20', notes: null, method_ids: [assay.id],
-      samples: [row('LOT-2291', { priority: null }), row('LOT-2292', { priority: null, container: 'HDPE bottle' })],
+      samples: [row('LOT-2291', { id: 'r1', priority: null }), row('LOT-2292', { id: 'r2', priority: null, container: 'HDPE bottle' })],
+      next_row: 3,
       provenance: {
         sample_type: { source: 'guessed', reason: 'Tablets are a drug product.' },
         priority: { source: 'default' },
@@ -196,6 +197,175 @@ test('a turn drafts from the client’s words: the gate fixes what it can, guess
   const choices = JSON.parse(/<choices>\n(.*)\n<\/choices>/.exec(call.input)[1]);
   assert.deepEqual(choices.tests.map((m) => m.id), methods.map((m) => m.id), 'the model sees only the tests this client may order');
   assert.ok(!JSON.stringify(choices).includes('price'));
+});
+
+const edited = { source: 'edited' };
+const keep = (path, text, options, proposal) => ({ path, text, options, proposal });
+const rowsOf = (t) => t.draft.samples.map((s) => [s.id, s.description, s.batch_no, s.quantity]);
+const lots = { samples: [{ id: 'r1', description: 'First', batch_no: 'LOT-1' }, { id: 'r2', description: 'Second', batch_no: 'LOT-2' }] };
+
+test('a row the model inserts before an edited row leaves the client’s batch on its own row', async () => {
+  fake([answer({ samples: [row('LOT-0', { id: null, description: 'Zero' }), row('LOT-1', { id: 'r1', description: 'First' }), row('LOT-2', { id: 'r2', description: 'Second' })] })]);
+  const t = await laura.ok('POST', '/api/portal/assistant', { message: 'Add lot LOT-0 as the first sample.', draft: { ...lots, provenance: { 'samples.1.batch_no': edited } } });
+  assert.deepEqual(rowsOf(t), [['r3', 'Zero', 'LOT-0', null], ['r1', 'First', 'LOT-1', null], ['r2', 'Second', 'LOT-2', null]]);
+  assert.deepEqual([t.draft.provenance['samples.2.batch_no'], t.draft.questions], [edited, []]);
+});
+
+test('rows the model reorders keep the client’s edits on the same samples', async () => {
+  fake([answer({ samples: [row('LOT-2', { id: 'r2', description: 'Second' }), row('LOT-1', { id: 'r1', description: 'First' })] })]);
+  const t = await laura.ok('POST', '/api/portal/assistant', { message: 'Put the second lot first.', draft: { ...lots, provenance: { 'samples.1.batch_no': edited, 'samples.1.description': edited } } });
+  assert.deepEqual(rowsOf(t), [['r2', 'Second', 'LOT-2', null], ['r1', 'First', 'LOT-1', null]]);
+  assert.deepEqual([t.draft.provenance['samples.0.batch_no'], t.draft.provenance['samples.0.description'], t.draft.questions], [edited, edited, []]);
+});
+
+test('an edited quantity stays when the message holds the model’s number inside a date', async () => {
+  fake([answer({ ship_date: '2026-10-20', samples: [row('LOT-1', { id: 'r1', description: 'First', quantity: '10' })] })]);
+  const t = await laura.ok('POST', '/api/portal/assistant', { message: 'Shipping on 2026-10-20 by FedEx.', draft: { samples: [{ id: 'r1', description: 'First', batch_no: 'LOT-1', quantity: '5' }], provenance: { 'samples.0.quantity': edited } } });
+  assert.deepEqual([rowsOf(t), t.draft.provenance['samples.0.quantity'], t.draft.questions], [
+    [['r1', 'First', 'LOT-1', '5']], edited,
+    [keep('samples.0.quantity', 'You set sample 1\'s quantity to "5". Change it to "10"?', ['10', 'Keep what I set'], { row: 'r1', field: 'quantity', value: '10' })],
+  ]);
+});
+
+test('an edited quantity stays when the message holds the model’s number inside a lot code', async () => {
+  fake([answer({ samples: [row('LOT-1', { id: 'r1', description: 'First', quantity: '1' })] })]);
+  const t = await laura.ok('POST', '/api/portal/assistant', { message: 'Lot LOT-1 is the only one.', draft: { samples: [{ id: 'r1', description: 'First', batch_no: 'LOT-1', quantity: '5' }], provenance: { 'samples.0.quantity': edited } } });
+  assert.deepEqual([rowsOf(t), t.draft.provenance['samples.0.quantity'], t.draft.questions], [
+    [['r1', 'First', 'LOT-1', '5']], edited,
+    [keep('samples.0.quantity', 'You set sample 1\'s quantity to "5". Change it to "1"?', ['1', 'Keep what I set'], { row: 'r1', field: 'quantity', value: '1' })],
+  ]);
+});
+
+test('the model never changes a value the client set, even when asked in words; it proposes the change instead', async () => {
+  const [assay] = methods;
+  const draft = {
+    courier: 'DHL', tracking_no: 'TRACK-TYPED-WHILE-WAITING', notes: 'Fragile', method_ids: [assay.id],
+    samples: [{ id: 'r1', description: 'Mine', batch_no: 'LOT-9' }],
+    provenance: { courier: edited, tracking_no: edited, notes: edited, method_ids: edited, 'samples.0.batch_no': edited },
+  };
+  const modelDraft = answer({ courier: 'UPS', tracking_no: 'FAKE-TRACK-1', method_ids: [assay.id], samples: [row('LOT-9', { id: 'r1' })] }, {
+    provenance: [{ path: 'courier', source: 'client', reason: '' }, { path: 'tracking_no', source: 'client', reason: '' }],
+    questions: [{ path: 'courier', text: 'Which courier?', options: ['UPS'] }],
+  });
+  const asks = [
+    keep('courier', 'You set the courier to "DHL". Change it to "UPS"?', ['UPS', 'Keep what I set'], { row: null, field: 'courier', value: 'UPS' }),
+    keep('tracking_no', 'You set the tracking number to "TRACK-TYPED-WHILE-WAITING". Change it to "FAKE-TRACK-1"?', ['FAKE-TRACK-1', 'Keep what I set'], { row: null, field: 'tracking_no', value: 'FAKE-TRACK-1' }),
+    keep('notes', 'You set the notes to "Fragile". Clear it?', ['Clear it', 'Keep what I set'], { row: null, field: 'notes', value: null }),
+  ];
+  const pick = (t) => [t.draft.courier, t.draft.tracking_no, t.draft.notes, rowsOf(t), t.draft.provenance.courier, t.draft.provenance.tracking_no, t.draft.provenance.notes, t.draft.questions];
+
+  fake([modelDraft]);
+  const asked = await laura.ok('POST', '/api/portal/assistant', { message: 'Please switch the courier to UPS.', draft });
+  assert.deepEqual(pick(asked), ['DHL', 'TRACK-TYPED-WHILE-WAITING', 'Fragile', [['r1', 'Paracetamol 500mg tablet', 'LOT-9', null]], edited, edited, edited, asks]);
+
+  fake([modelDraft]);
+  const declined = [{ row: null, field: 'courier', value: 'UPS' }, { row: null, field: 'notes', value: null }];
+  const again = await laura.ok('POST', '/api/portal/assistant', { message: 'Anything else?', draft, declined });
+  assert.deepEqual(pick(again), ['DHL', 'TRACK-TYPED-WHILE-WAITING', 'Fragile', [['r1', 'Paracetamol 500mg tablet', 'LOT-9', null]], edited, edited, edited, [asks[1]]], 'a proposal turned down is not asked again');
+
+  fake([answer({ courier: 'FedEx', method_ids: [assay.id], samples: [row('LOT-9', { id: 'r1' })] })]);
+  const other = await laura.ok('POST', '/api/portal/assistant', { message: 'Anything else?', draft: { ...draft, notes: null, tracking_no: null }, declined });
+  assert.deepEqual([other.draft.courier, other.draft.notes, other.draft.provenance.notes, other.draft.questions.map((q) => q.text)], [
+    'DHL', null, edited, ['You set the courier to "DHL". Change it to "FedEx"?'],
+  ], 'another value for the same field is asked; an emptied field stays empty');
+});
+
+test('what the client edited stays without a question when the model only reorders tests, and asks in short chips', async () => {
+  const [a, b] = methods;
+  const longNote = `Handle with care. ${'N'.repeat(300)}`;
+  fake([answer({ method_ids: [a.id, b.id], courier: 'UPS', notes: longNote, samples: [row('LOT-1', { id: 'r1', description: 'First', priority: 'Urgent' })] })]);
+  const t = await laura.ok('POST', '/api/portal/assistant', {
+    message: 'Anything else?',
+    draft: { method_ids: [b.id, a.id], courier: null, notes: 'Fragile', samples: [{ id: 'r1', description: 'First', batch_no: 'LOT-1', priority: 'Standard' }], provenance: { method_ids: edited, courier: edited, notes: edited, 'samples.0.priority': edited } },
+  });
+  assert.deepEqual([t.draft.method_ids, t.draft.courier, t.draft.notes, t.draft.samples[0].priority], [[b.id, a.id], null, 'Fragile', 'Standard']);
+  assert.deepEqual(t.draft.questions.map((q) => [q.path, q.text, q.options]), [
+    ['courier', 'You emptied the courier. Set it to "UPS"?', ['UPS', 'Keep what I set']],
+    ['notes', `You set the notes to "Fragile". Change it to "${longNote}"?`, ['Handle with care. NNNNNNNNNNNNNNNNNNNNN…', 'Keep what I set']],
+    ['samples.0.priority', 'You set sample 1\'s turnaround to "Standard". Change it to "Urgent"?', ['Urgent', 'Keep what I set']],
+  ]);
+});
+
+test('the model may remove a row the client did not edit; a row they edited it leaves out stays, with a question', async () => {
+  fake([answer({ samples: [row('LOT-1', { id: 'r1', description: 'First' })] })]);
+  const removed = await laura.ok('POST', '/api/portal/assistant', { message: 'Remove the second lot.', draft: { ...lots, provenance: { 'samples.0.batch_no': edited } } });
+  assert.deepEqual([rowsOf(removed), removed.draft.questions], [[['r1', 'First', 'LOT-1', null]], []]);
+
+  fake([answer({ samples: [row('LOT-1', { id: 'r1', description: 'First' }), row('LOT-3', { id: 'r7', description: 'Third' })] })]);
+  const dropped = await laura.ok('POST', '/api/portal/assistant', { message: 'Only one lot after all, and add LOT-3.', draft: { ...lots, provenance: { 'samples.1.batch_no': edited } } });
+  assert.deepEqual([rowsOf(dropped), dropped.draft.provenance['samples.1.batch_no'], dropped.draft.questions], [
+    [['r1', 'First', 'LOT-1', null], ['r2', 'Second', 'LOT-2', null], ['r3', 'Third', 'LOT-3', null]],
+    edited,
+    [{ path: 'samples.1', text: 'You edited sample 2 (LOT-2) by hand, so it stays although the assistant left it out. To remove it, remove it in the draft.', options: [] }],
+  ], 'an id the model made up (r7) is a new row');
+});
+
+test('a row the client removed never lends its id to a row added later, so its old proposal cannot reach another lot', async () => {
+  fake([answer({ samples: [row('LOT-1', { id: null, description: 'First' }), row('LOT-2', { id: null, description: 'Second' })] })]);
+  const one = await laura.ok('POST', '/api/portal/assistant', { message: 'Two lots, LOT-1 and LOT-2.', draft: { samples: [{ id: 'r1' }], next_row: 2 } });
+  assert.deepEqual(rowsOf(one), [['r2', 'First', 'LOT-1', null], ['r3', 'Second', 'LOT-2', null]]);
+
+  const added = {
+    ...one.draft,
+    samples: [...one.draft.samples, { id: 'r4', description: 'Third', batch_no: 'LOT-3' }],
+    next_row: 5,
+    provenance: { ...one.draft.provenance, 'samples.2.description': edited, 'samples.2.batch_no': edited },
+  };
+  fake([answer({ samples: [row('LOT-1', { id: 'r2', description: 'First' }), row('LOT-2', { id: 'r3', description: 'Second' }), row('LOT-3X', { id: 'r4', description: 'Third' })] })]);
+  const two = await laura.ok('POST', '/api/portal/assistant', { message: 'Is the third lot right?', draft: added, history: [{ role: 'client', text: 'Two lots, LOT-1 and LOT-2.' }] });
+  assert.deepEqual([rowsOf(two), two.draft.questions], [
+    [['r2', 'First', 'LOT-1', null], ['r3', 'Second', 'LOT-2', null], ['r4', 'Third', 'LOT-3', null]],
+    [keep('samples.2.batch_no', 'You set sample 3\'s batch to "LOT-3". Change it to "LOT-3X"?', ['LOT-3X', 'Keep what I set'], { row: 'r4', field: 'batch_no', value: 'LOT-3X' })],
+  ]);
+
+  const removed = { ...two.draft, samples: two.draft.samples.slice(0, 2), provenance: Object.fromEntries(Object.entries(two.draft.provenance).filter(([path]) => !path.startsWith('samples.2.'))) };
+  fake([answer({ samples: [row('LOT-1', { id: 'r2', description: 'First' }), row('LOT-2', { id: 'r3', description: 'Second' }), row('LOT-4', { id: null, description: 'Fourth' })] })]);
+  const three = await laura.ok('POST', '/api/portal/assistant', { message: 'Add LOT-4 as well.', draft: removed });
+  assert.deepEqual([rowsOf(three), three.draft.questions, three.draft.next_row], [
+    [['r2', 'First', 'LOT-1', null], ['r3', 'Second', 'LOT-2', null], ['r5', 'Fourth', 'LOT-4', null]],
+    [],
+    6,
+  ], 'the new lot gets r5, never the removed row’s r4, and the removed row’s proposal is not asked again');
+});
+
+test('the server never gives an id at or below one the conversation used: the client’s counter, its rows, or a declined row', async () => {
+  fake([answer({ samples: [row('LOT-1', { id: 'r1', description: 'First' }), row('LOT-9', { id: null, description: 'New' })] })]);
+  const counter = await laura.ok('POST', '/api/portal/assistant', { message: 'Add LOT-9.', draft: { samples: [{ id: 'r1', description: 'First', batch_no: 'LOT-1' }], next_row: 8 } });
+  assert.deepEqual([rowsOf(counter).map(([id]) => id), counter.draft.next_row], [['r1', 'r8'], 9]);
+
+  fake([answer({ samples: [row('LOT-1', { id: 'r1', description: 'First' }), row('LOT-9', { id: null, description: 'New' })] })]);
+  const declinedRow = await laura.ok('POST', '/api/portal/assistant', {
+    message: 'Add LOT-9.', draft: { samples: [{ id: 'r1', description: 'First', batch_no: 'LOT-1' }], next_row: 2 }, declined: [{ row: 'r6', field: 'batch_no', value: 'LOT-6' }],
+  });
+  assert.deepEqual([rowsOf(declinedRow).map(([id]) => id), declinedRow.draft.next_row], [['r1', 'r7'], 8]);
+});
+
+test('a proposal the client has not answered is asked again by the next reply, until they take it, turn it down or remove its row', async () => {
+  const pending = keep('courier', 'You set the courier to "DHL". Change it to "UPS"?', ['UPS', 'Keep what I set'], { row: null, field: 'courier', value: 'UPS' });
+  const draft = { courier: 'DHL', samples: [{ id: 'r1', description: 'First', batch_no: 'LOT-1' }], next_row: 2, provenance: { courier: edited }, questions: [pending] };
+  const keeps = (courier) => answer({ courier, samples: [row('LOT-1', { id: 'r1', description: 'First' })] });
+
+  fake([keeps('DHL')]);
+  const again = await laura.ok('POST', '/api/portal/assistant', { message: 'Is anything else needed?', draft });
+  assert.deepEqual([again.draft.courier, again.draft.questions], ['DHL', [pending]]);
+
+  fake([keeps('UPS')]);
+  const taken = await laura.ok('POST', '/api/portal/assistant', { message: 'Is anything else needed?', draft: { ...draft, courier: 'UPS' } });
+  assert.deepEqual([taken.draft.courier, taken.draft.questions], ['UPS', []]);
+
+  fake([keeps('DHL')]);
+  const turnedDown = await laura.ok('POST', '/api/portal/assistant', { message: 'Is anything else needed?', draft, declined: [{ row: null, field: 'courier', value: 'UPS' }] });
+  assert.deepEqual([turnedDown.draft.courier, turnedDown.draft.questions], ['DHL', []]);
+
+  fake([keeps('DHL')]);
+  const forged = await laura.ok('POST', '/api/portal/assistant', { message: 'Is anything else needed?', draft: { ...draft, questions: [{ ...pending, proposal: { row: null, field: '__proto__', value: 'UPS' } }] } });
+  assert.deepEqual(forged.draft.questions, [], 'a proposal for a field the draft does not have is dropped');
+});
+
+test('a proposed value that reads "Keep what I set" gets a chip of its own, not a second "Keep what I set"', async () => {
+  fake([answer({ notes: 'Keep what I set', samples: [row('LOT-1', { id: 'r1', description: 'First' })] })]);
+  const t = await laura.ok('POST', '/api/portal/assistant', { message: 'Anything else?', draft: { notes: 'x', samples: [{ id: 'r1', description: 'First', batch_no: 'LOT-1' }], provenance: { notes: edited } } });
+  assert.deepEqual(t.draft.questions, [keep('notes', 'You set the notes to "x". Change it to "Keep what I set"?', ['Change it', 'Keep what I set'], { row: null, field: 'notes', value: 'Keep what I set' })]);
 });
 
 test('client text cannot close the prompt’s data block', async () => {
@@ -246,7 +416,8 @@ test('after three failed tries the draft comes back unchanged with what failed',
   const draft = { samples: [{ description: 'Kept by hand' }], provenance: { 'samples.0.description': { source: 'edited' } } };
   const turn = await laura.ok('POST', '/api/portal/assistant', { message: 'Keep it cold', draft });
   assert.equal(turn.attempts, 3);
-  assert.deepEqual(turn.unresolved.map((p) => p.message), [`Storage must be one of: Ambient (15–25 °C), Refrigerated (2–8 °C), Frozen (−20 °C), Deep frozen (−80 °C), Ambient, protect from light`, 'Add at least one sample']);
+  assert.deepEqual(turn.unresolved.map((p) => p.message), [`Storage must be one of: Ambient (15–25 °C), Refrigerated (2–8 °C), Frozen (−20 °C), Deep frozen (−80 °C), Ambient, protect from light`]);
+  assert.deepEqual(turn.draft.samples.map((s) => s.description), ['Kept by hand'], 'the model dropped the row the client typed; it stays');
   assert.equal(prompts().length, 3);
 
   fake([{ output: { reply: 'no draft here' } }]);
