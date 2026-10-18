@@ -5,7 +5,8 @@ import { HttpError, bad, forbidden, isLoopback, notFound, queued } from '../http
 import {
   can, checkPasswordPolicy, destroySession, destroyOtherSessions, hashPassword, login, permissionsFor, publicUser, registerFailure, verifyPassword,
 } from '../auth.js';
-import { getSettings, setSettings, DEFAULTS } from '../settings.js';
+import { getSettings, setSettings, labSettings, DEFAULTS, ASSISTANT_SETTINGS } from '../settings.js';
+import { assistantStatus, updateAssistant } from '../assistant.js';
 import { ROLES, lookups, RECORD_ACCESS, MONEY_FIELDS, PRIORITY_TIERS, rolesWith } from '../lookups.js';
 import { clean, initialsOf, likeTerm, limitParam, nowIso, today, addDays } from '../util.js';
 import { seedDemo } from '../seed.js';
@@ -221,18 +222,23 @@ export default function routes(r) {
   }, { perm: 'qualifications.manage' });
 
   // ---------- Settings ----------
-  r.get('/api/settings', () => getSettings());
+  // The assistant's approval, with the Claude account it names, is read by administrators at /api/settings/assistant.
+  r.get('/api/settings', () => labSettings());
   r.put('/api/settings', (ctx) => {
     const patch = {};
-    for (const k of Object.keys(DEFAULTS)) if (k in ctx.body) patch[k] = ctx.body[k];
+    for (const k of Object.keys(DEFAULTS)) if (k in ctx.body && !ASSISTANT_SETTINGS.includes(k)) patch[k] = ctx.body[k];
     for (const k of ['tax_rate', ...SURCHARGE_SETTINGS, 'payment_terms_days', 'session_idle_minutes']) {
       if (k in patch && !Number.isFinite(Number(patch[k]))) throw bad(`${k.replace(/_/g, ' ')} must be a number`);
     }
     if ('session_idle_minutes' in patch && (Number(patch.session_idle_minutes) < 5 || Number(patch.session_idle_minutes) > 720)) {
       throw bad('Idle timeout must be between 5 and 720 minutes');
     }
-    return setSettings(ctx, patch);
+    setSettings(ctx, patch);
+    return labSettings();
   }, { perm: 'settings.edit' });
+
+  r.get('/api/settings/assistant', () => assistantStatus(), { perm: 'settings.edit' });
+  r.post('/api/settings/assistant', (ctx) => updateAssistant(ctx, ctx.body), { perm: 'settings.edit' });
 
   // ---------- Audit trail ----------
   r.get('/api/audit', (ctx) => {

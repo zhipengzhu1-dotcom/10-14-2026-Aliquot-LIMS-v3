@@ -18,7 +18,16 @@ export const DEFAULTS = {
   session_idle_minutes: '60',
   coa_statement: 'The results in this certificate relate only to the samples tested as received. This certificate shall not be reproduced except in full without the written approval of the laboratory.',
   demo_mode: '0',
+  // The submission assistant. Only updateAssistant (server/assistant.js) writes these.
+  assistant_enabled: '0',
+  assistant_model: 'claude-opus-5-5',
+  assistant_effort: 'medium',
+  assistant_approved_by: '',
+  assistant_approved_at: '',
+  assistant_account: '',
 };
+
+export const ASSISTANT_SETTINGS = Object.keys(DEFAULTS).filter((key) => key.startsWith('assistant_'));
 
 let cache = null;
 
@@ -30,10 +39,13 @@ export function getSettings() {
   return { ...cache };
 }
 
+/** The settings any staff member may read: all but the assistant's approval, which names the lab's Claude account. */
+export const labSettings = () => Object.fromEntries(Object.entries(getSettings()).filter(([key]) => !ASSISTANT_SETTINGS.includes(key)));
+
 export const getSetting = (key) => getSettings()[key];
 export const getNumber = (key) => Number(getSetting(key)) || 0;
 
-export function setSettings(ctx, patch) {
+export function setSettings(ctx, patch, summary = 'Laboratory settings changed') {
   const current = getSettings();
   const changes = {};
   tx(() => {
@@ -44,7 +56,7 @@ export function setSettings(ctx, patch) {
       run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value);
       changes[key] = [current[key], value];
     }
-    if (Object.keys(changes).length) audit(ctx, { action: 'UPDATE', entity: 'settings', summary: 'Laboratory settings changed', changes });
+    if (Object.keys(changes).length) audit(ctx, { action: 'UPDATE', entity: 'settings', summary, changes });
   });
   cache = null;
   return getSettings();
