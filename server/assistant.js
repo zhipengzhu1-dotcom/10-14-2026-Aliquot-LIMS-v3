@@ -180,6 +180,68 @@ export function readModelDraft(output, { previous, clientWords }) {
   return { ...body, provenance, questions: readQuestions(output.questions), reply: text(output.reply, 4000) ?? 'I updated the draft.' };
 }
 
+const FIELD_NAMES = {
+  project_id: 'the project', sample_type: 'the sample type', priority: 'the turnaround', storage: 'storage', courier: 'the courier',
+  tracking_no: 'the tracking number', ship_date: 'the ship date', notes: 'the notes', method_ids: 'the tests', description: 'name',
+  product_code: 'product code', batch_no: 'batch', client_ref: 'reference', quantity: 'quantity', container: 'container', stage: 'stage',
+  details: 'extra detail',
+};
+const fieldName = (path) => {
+  const m = /^samples\.(\d+)\.(\w+)$/.exec(path);
+  return m ? `sample ${Number(m[1]) + 1}'s ${FIELD_NAMES[m[2]]}` : FIELD_NAMES[path];
+};
+
+/** A value as the client reads and writes it: a project by its code, tests by their codes. Empty for no value. */
+function valueText(context, path, v) {
+  if (!filled(v)) return '';
+  if (path === 'project_id') return context.projects.find((p) => p.id === v)?.code ?? String(v);
+  if (path === 'method_ids') return v.map((id) => context.methods.find((m) => m.id === id)?.code ?? id).join(', ');
+  if (Array.isArray(v)) return v.map((d) => `${d.label}: ${d.value}`).join(', ');
+  return String(v);
+}
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const says = (message, value) => new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(value)}($|[^\\p{L}\\p{N}])`, 'iu').test(message);
+const brief = (s) => (s.length > 60 ? `${s.slice(0, 57)}…` : s);
+const KEEP = 'Keep what I set';
+
+/**
+ * What the client set by hand stays theirs. The model's different value for an `edited` path replaces the client's only
+ * when the client's newest message holds that value as written; otherwise the client's value stays and the change comes
+ * back as a question. A turn that would drop sample rows the client edited keeps every row as the client had it.
+ */
+function keepEdits(draft, previous, { message, context }) {
+  const edits = Object.keys(previous.provenance).filter((path) => previous.provenance[path].source === 'edited');
+  const next = structuredClone(draft);
+  const asks = [];
+  const isRow = (path) => path.startsWith('samples.');
+  if (next.samples.length < previous.samples.length && edits.some(isRow)) {
+    next.samples = structuredClone(previous.samples);
+    next.provenance = Object.fromEntries([
+      ...Object.entries(next.provenance).filter(([path]) => !isRow(path)),
+      ...Object.entries(previous.provenance).filter(([path]) => isRow(path)),
+    ]);
+    asks.push({ path: 'samples', text: `You edited the samples by hand, so all ${previous.samples.length} stay. Remove any you do not want in the draft.`, options: [] });
+  }
+  for (const path of edits) {
+    const mine = getPath(previous, path);
+    const theirs = getPath(next, path);
+    if (same(mine, theirs)) continue;
+    const proposed = valueText(context, path, theirs);
+    if (proposed && says(message, proposed)) {
+      next.provenance[path] = { source: 'client' };
+      continue;
+    }
+    setPath(next, path, structuredClone(mine));
+    next.provenance[path] = previous.provenance[path];
+    const was = brief(valueText(context, path, mine));
+    asks.push(proposed
+      ? { path, text: `You set ${fieldName(path)} to "${was}". Change it to "${brief(proposed)}"?`, options: [proposed, KEEP] }
+      : { path, text: `You set ${fieldName(path)} to "${was}", so it stays. To clear it, empty it in the draft.`, options: [] });
+  }
+  next.questions = [...next.questions.filter((q) => !asks.some((a) => a.path === q.path)), ...asks];
+  return next;
+}
+
 const fixReason = (before, p) => (typeof p.fix.value === 'string'
   ? `"${before}" is not one of the choices, so it became "${p.fix.value}".`
   : `${p.message}, so it was taken off.`);
@@ -313,8 +375,9 @@ export async function draftSubmission(pu, input, { model: chosen, effort }) {
       continue;
     }
     const { reply, ...draft } = read;
-    turn = { reply, ...gateDraft(context, draft) };
-    problems = turn.gate.problems.filter((p) => !asked(p, draft.questions));
+    const kept = keepEdits(draft, previous, { message, context });
+    turn = { reply, ...gateDraft(context, kept) };
+    problems = turn.gate.problems.filter((p) => !asked(p, kept.questions));
     if (!problems.length) break;
   }
   const result = turn ?? {

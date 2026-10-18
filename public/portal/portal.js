@@ -886,7 +886,7 @@ function messageHtml(m, i) {
   if (m.role === 'client') return html`<div class="msg client"><div class="meta">You</div><div class="bubble">${m.text}</div></div>`;
   return html`<div class="msg lab as-reply"><div class="meta">Assistant${m.meta ? html` · <span class="js-answered-by">${m.meta}</span>` : ''}</div><div class="bubble"><span class="as-text">${m.text}</span>
     ${m.unresolved?.length ? html`<div class="as-q"><b>Still open after ${plural(m.attempts, 'try', 'tries')}:</b> ${m.unresolved.map((p) => p.message).join('; ')}</div>` : ''}
-    ${(m.questions ?? []).map((q, qi) => html`<div class="as-q"><b>${q.text}</b>${q.options.length ? html`<div class="as-choices">${q.options.map((o) => html`<button class="as-choice" type="button" data-answer="${`${i}:${qi}`}" data-value="${o}" ${q.answered ? raw('disabled') : ''} aria-pressed="${String(q.answered === o)}">${o}</button>`)}</div>` : ''}</div>`)}</div></div>`;
+    ${(m.questions ?? []).map((q, qi) => html`<div class="as-q"><b>${q.text}</b>${q.options.length ? html`<div class="as-choices">${q.options.map((o) => html`<button class="as-choice" type="button" data-answer="${`${i}:${qi}`}" data-value="${o}" ${q.answered || desk.busy ? raw('disabled') : ''} aria-pressed="${String(q.answered === o)}">${o}</button>`)}</div>` : ''}</div>`)}</div></div>`;
 }
 
 function chatHtml() {
@@ -979,14 +979,15 @@ function mountDesk(root) {
     renderTabs();
   };
   const renderDraft = () => {
-    const focused = draftCol.contains(document.activeElement) ? document.activeElement.id : '';
+    const active = draftCol.contains(document.activeElement) ? document.activeElement : null;
+    const caret = ['text', 'textarea'].includes(active?.type) ? [active.selectionStart, active.selectionEnd] : null;
     desk.table = draftCol.clientWidth >= TABLE_MIN;
     $in('.js-form').innerHTML = String(formHtml());
     renderChecks();
-    const el = focused && document.getElementById(focused);
+    const el = active?.id && document.getElementById(active.id);
     if (el) {
       el.focus();
-      if (el.setSelectionRange && el.type === 'text') el.setSelectionRange(el.value.length, el.value.length);
+      if (caret) el.setSelectionRange(...caret);
     }
   };
   // Every change runs the same checks the lab runs on a submission, without saving anything.
@@ -1032,7 +1033,7 @@ function mountDesk(root) {
   new ResizeObserver(() => {
     if (!root.contains(draftCol)) return;
     const wide = draftCol.clientWidth >= TABLE_MIN;
-    if (draftCol.clientWidth && wide !== desk.table && !draftCol.contains(document.activeElement)) renderDraft();
+    if (draftCol.clientWidth && wide !== desk.table) renderDraft();
   }).observe(draftCol);
 
   const history = () => desk.messages.filter((m) => m.role === 'client' || m.role === 'assistant').map((m) => ({ role: m.role, text: m.text }));
@@ -1085,7 +1086,7 @@ function mountDesk(root) {
   });
   $in('.js-chat').addEventListener('click', (e) => {
     const b = e.target.closest('[data-answer]');
-    if (!b || b.disabled) return;
+    if (!b || b.disabled || desk.busy) return;
     const [mi, qi] = b.dataset.answer.split(':').map(Number);
     desk.messages[mi].questions[qi].answered = b.dataset.value;
     ask(b.dataset.value);
