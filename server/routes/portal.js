@@ -17,6 +17,7 @@ import { SAMPLE_TYPES, STORAGE_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, D
 import { clean, nowIso, idList, addDays, today, specText, fixed } from '../util.js';
 import { receiveSamples } from './lab.js';
 import { checkSubmission, submissionContext, clientMethods, openProjects } from '../submission-gate.js';
+import { assistantSetting, draftSubmission, modelLabel } from '../assistant.js';
 import { createProject } from './business.js';
 import { previewXlsx } from '../ooxml.js';
 
@@ -483,6 +484,15 @@ export default function routes(r) {
   }, { auth: false, raw: true, limit: 2 * 1024 * 1024 });
 
   r.post('/api/portal/submissions', (ctx) => submitSamples(portalCtx(ctx, portalAuth(ctx)), ctx.portal, ctx.body), open);
+
+  // The submission assistant drafts; the client sends the draft through POST /api/portal/submissions like any other.
+  r.get('/api/portal/assistant', (ctx) => {
+    portalAuth(ctx);
+    const { enabled, model, effort } = assistantSetting();
+    return { enabled, model, model_label: modelLabel(model), effort };
+  }, open);
+
+  r.post('/api/portal/assistant', (ctx) => draftSubmission(portalAuth(ctx), ctx.body), open);
 
   // The checks a submission must pass, run on a draft without saving it.
   r.post('/api/portal/submissions/check', (ctx) => {

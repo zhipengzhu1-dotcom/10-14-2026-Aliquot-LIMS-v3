@@ -2,7 +2,39 @@ import { html } from '../core/html.js';
 import { api } from '../core/api.js';
 import { state } from '../core/state.js';
 import { icon } from '../core/icons.js';
-import { pageHead, card, field, formData, toast, busy, plural } from '../core/ui.js';
+import { pageHead, card, field, formData, toast, busy, plural, fmtDateTime } from '../core/ui.js';
+
+/** The submission assistant's card: what it does, whether it is on and who approved it, and the Claude account found now. */
+function assistantBody(st) {
+  const s = st.setting;
+  return html`<p class="small" style="margin:0 0 10px">Drafts sample submissions in the client portal from what clients paste or attach. It uses the Claude subscription signed in on the computer that runs Aliquot (${s.model}, ${s.effort} effort). It never sends anything: the client reviews the draft and presses Send to lab.</p>
+    <dl class="kv">
+      <dt>Status</dt><dd data-assistant-state>${s.enabled ? 'On' : 'Off'}</dd>
+      ${s.approved_by ? html`<dt>${s.enabled ? 'Approved by' : 'Last approved by'}</dt><dd>${s.approved_by}, ${fmtDateTime(s.approved_at)}</dd><dt>Approved account</dt><dd>${s.account}</dd>` : ''}
+      <dt>Claude account found</dt><dd>${st.account ? st.account.name : html`<span class="muted">${st.problem}</span>`}</dd>
+    </dl>
+    <div style="margin-top:12px">${s.enabled
+      ? html`<button class="btn" type="button" data-act="assistant-off">Turn off</button>`
+      : html`<button class="btn primary" type="button" data-act="assistant-on">Turn on</button>`}</div>`;
+}
+
+async function mountAssistant(box) {
+  let status;
+  try {
+    status = await api.get('/api/settings/assistant');
+  } catch (e) {
+    box.innerHTML = String(card({ title: 'Submission assistant', body: html`<p class="small muted" style="margin:0">${e.message}</p>` }));
+    return;
+  }
+  box.innerHTML = String(card({ title: 'Submission assistant', body: assistantBody(status) }));
+  box.querySelector('[data-act^=assistant]').addEventListener('click', async (e) => {
+    const on = e.currentTarget.dataset.act === 'assistant-on';
+    const st = await busy(e.currentTarget, () => api.post('/api/settings/assistant', { enabled: on }));
+    if (!st) return;
+    toast(on ? 'Submission assistant turned on' : 'Submission assistant turned off');
+    mountAssistant(box);
+  });
+}
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CHF', 'CAD', 'AUD', 'JPY', 'CNY', 'INR', 'SGD', 'SEK', 'DKK', 'NOK', 'PLN', 'BRL', 'ZAR'];
 
@@ -33,12 +65,14 @@ export async function render(ctx) {
             ${field({ label: 'Sign out after inactivity (minutes)', name: 'session_idle_minutes', type: 'number', value: s.session_idle_minutes, min: 5, max: 720, span: 2, hint: 'Shared bench computers: 15–30 minutes is typical. Accounts lock for 15 minutes after 5 wrong passwords.' })}
             ${field({ label: 'Show demo banner and demo sign-in buttons', name: 'demo_mode', type: 'checkbox', value: s.demo_mode === '1', span: 2 })}
           </div>` })}
+          <div data-assistant>${card({ title: 'Submission assistant', body: html`<p class="small muted" style="margin:0">Looking for a Claude account on this computer…</p>` })}</div>
           ${card({ title: 'Backups', body: html`<p class="small" style="margin:0">${icon('shield', { size: 13 })} The server writes a consistent snapshot of the database every day to <code>data/backups/</code> and keeps the last 14. Copy that folder to another location (network drive, cloud storage) regularly — see the README.</p>` })}
         </div>
       </div>
       <div class="card mt"><div class="summary-bar"><span class="muted small">Changes are recorded in the audit trail.</span><span class="spacer"></span><button class="btn primary" type="submit">${icon('check', { size: 15 })}Save settings</button></div></div>
     </form>`);
   const form = ctx.el.querySelector('form');
+  mountAssistant(ctx.el.querySelector('[data-assistant]'));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const d = formData(form);
