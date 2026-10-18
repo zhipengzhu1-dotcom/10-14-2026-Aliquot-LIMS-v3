@@ -267,7 +267,7 @@ export function draftPrompt({ context, draft, history, message, problems, date =
   const { provenance, questions, ...body } = draft;
   const choices = {
     sample_types: SAMPLE_TYPES, storage_conditions: STORAGE_CONDITIONS, stages: STAGES, turnarounds: PRIORITIES, default_turnaround: DEFAULT_PRIORITY,
-    projects: context.projects.map(({ id, code, title }) => ({ id, code, title })),
+    projects: context.projects.map(({ id, code, title }) => ({ id, code: data(code), title: data(title) })),
     tests: context.methods.map(({ id, code, title, technique }) => ({ id, code, title, technique })),
   };
   return [

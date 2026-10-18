@@ -6,7 +6,7 @@ import { insert, update, nextCode, mustGet } from '../repo.js';
 import { audit } from '../audit.js';
 import { HttpError, bad, guard, flags, queued, workQueue } from '../http.js';
 import { assertCan } from '../auth.js';
-import { getNumber, getSettings } from '../settings.js';
+import { getNumber, labSettings } from '../settings.js';
 import {
   SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, CUSTODY_ACTIONS, METHOD_USABLE, SAMPLE_OPEN, priorityRank, rolesWith,
 } from '../lookups.js';
@@ -297,7 +297,7 @@ export default function routes(r) {
       sample,
       tests,
       signatures: all(`SELECT * FROM signatures WHERE entity = 'samples' AND entity_id = ? ORDER BY id`, id),
-      lab: getSettings(),
+      lab: labSettings(),
       complies: all_results.length > 0 && all_results.every((x) => ['Pass', 'Report'].includes(x.outcome)),
       final: sample.status === 'Reported',
     };

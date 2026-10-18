@@ -39,6 +39,9 @@ export function getSettings() {
   return { ...cache };
 }
 
+/** The settings any staff member may read: all but the assistant's approval, which names the lab's Claude account. */
+export const labSettings = () => Object.fromEntries(Object.entries(getSettings()).filter(([key]) => !ASSISTANT_SETTINGS.includes(key)));
+
 export const getSetting = (key) => getSettings()[key];
 export const getNumber = (key) => Number(getSetting(key)) || 0;
 
