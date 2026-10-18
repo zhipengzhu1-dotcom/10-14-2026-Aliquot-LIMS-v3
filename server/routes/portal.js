@@ -493,9 +493,24 @@ export default function routes(r) {
   }, open);
 
   // The client may pick another model or effort for their conversation, only from the table; the lab's is the default.
-  r.post('/api/portal/assistant', (ctx) => {
+  r.post('/api/portal/assistant', async (ctx) => {
     const pu = portalAuth(ctx);
-    return draftSubmission(pu, ctx.body, readChoice(ctx.body, assistantSetting()));
+    const choice = readChoice(ctx.body, assistantSetting());
+    if (!/\bapplication\/x-ndjson\b/.test(ctx.req.headers.accept ?? '')) return draftSubmission(pu, ctx.body, choice);
+    const { res } = ctx;
+    const line = (event) => {
+      if (!res.headersSent) res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+      res.write(`${JSON.stringify(event)}\n`);
+    };
+    try {
+      const turn = await draftSubmission(pu, ctx.body, choice, { onText: (text) => line({ type: 'reply', text }) });
+      line({ type: 'done', ...turn });
+    } catch (e) {
+      if (!res.headersSent) throw e;
+      if (!(e instanceof HttpError)) console.error(`[${nowIso()}] POST /api/portal/assistant`, e);
+      line(e instanceof HttpError ? { type: 'error', error: e.message, code: e.code } : { type: 'error', error: 'Something went wrong on the server. The error has been logged.' });
+    }
+    res.end();
   }, open);
 
   // The checks a submission must pass, run on a draft without saving it.

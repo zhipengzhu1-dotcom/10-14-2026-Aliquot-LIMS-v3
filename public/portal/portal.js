@@ -120,18 +120,58 @@ async function api(path, { method = 'GET', body, file } = {}) {
   try {
     res = await fetch(`/api/portal${path}`, { method, credentials: 'same-origin', headers: { 'X-Requested-With': 'aliquot', ...sent.headers }, body: sent.body });
   } catch {
-    throw new Error('We could not reach the laboratory server. Check your connection and try again.');
+    throw new Error(UNREACHABLE);
   }
   const data = res.headers.get('content-type')?.includes('application/json') ? await res.json().catch(() => null) : null;
-  if (!res.ok) {
-    const err = Object.assign(new Error(data?.error || `Request failed (${res.status})`), { status: res.status, code: data?.code });
-    if (err.code === 'PORTAL_AUTH' && state.me) { state.me = null; showSignIn(err.message); err.handled = true; }
-    if (err.code === 'PASSWORD_CHANGE_REQUIRED') { showPasswordChange(); err.handled = true; }
-    throw err;
-  }
+  if (!res.ok) throw refusal(res.status, data);
   return data;
 }
 const post = (path, body = {}) => api(path, { method: 'POST', body });
+const UNREACHABLE = 'We could not reach the laboratory server. Check your connection and try again.';
+
+function refusal(status, data) {
+  const err = Object.assign(new Error(data?.error || `Request failed (${status})`), { status, code: data?.code });
+  if (err.code === 'PORTAL_AUTH' && state.me) { state.me = null; showSignIn(err.message); err.handled = true; }
+  if (err.code === 'PASSWORD_CHANGE_REQUIRED') { showPasswordChange(); err.handled = true; }
+  return err;
+}
+
+async function postStreamed(path, body, onEvent) {
+  let res;
+  try {
+    res = await fetch(`/api/portal${path}`, { method: 'POST', credentials: 'same-origin', headers: { 'X-Requested-With': 'aliquot', 'Content-Type': 'application/json', Accept: 'application/x-ndjson' }, body: JSON.stringify(body) });
+  } catch {
+    throw new Error(UNREACHABLE);
+  }
+  if (!res.headers.get('content-type')?.includes('application/x-ndjson')) {
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw refusal(res.status, data);
+    return data;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    let chunk;
+    try {
+      chunk = await reader.read();
+    } catch {
+      throw new Error(UNREACHABLE);
+    }
+    buf += decoder.decode(chunk.value, { stream: !chunk.done });
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i);
+      buf = buf.slice(i + 1);
+      if (!line.trim()) continue;
+      const event = JSON.parse(line);
+      if (event.type === 'done') return event;
+      if (event.type === 'error') throw refusal(null, event);
+      onEvent(event);
+    }
+    if (chunk.done) throw new Error(UNREACHABLE);
+  }
+}
 
 const state = { info: null, me: null, lookups: null };
 const lookups = async () => (state.lookups ||= await api('/lookups'));
@@ -724,7 +764,7 @@ let desk = null;
 
 function newDesk(lk, assistant) {
   return {
-    lk, assistant, draft: blankDraft(lk), gate: null, checking: false, busy: false, tab: 'chat', table: false, declined: [],
+    lk, assistant, draft: blankDraft(lk), gate: null, checking: false, busy: false, partial: '', tab: 'chat', table: false, declined: [],
     choice: assistant.enabled ? { model: assistant.model, effort: assistant.effort } : null,
     messages: assistant.enabled ? [{ role: 'assistant', text: GREETING }] : [],
   };
@@ -906,7 +946,7 @@ function chatHtml() {
       <p>${a.error ?? 'Your lab has not turned it on.'} Fill in the submission by hand. It is checked the same way, and you can attach a spreadsheet.</p></div></div></div></section>`;
   }
   return html`<section class="card as-chat">${head}
-    <div class="msgs as-thread js-thread" aria-live="polite">${desk.messages.map(messageHtml)}${desk.busy ? html`<div class="msg lab"><div class="meta">Assistant</div><div class="bubble"><span class="as-typing" aria-label="The assistant is drafting"><i></i><i></i><i></i></span></div></div>` : ''}</div>
+    <div class="msgs as-thread js-thread" aria-live="polite">${desk.messages.map(messageHtml)}${desk.busy ? html`<div class="msg lab as-live"><div class="meta">Assistant</div><div class="bubble"><span class="as-text js-partial" aria-live="off">${desk.partial}</span><span class="as-typing" aria-label="The assistant is drafting"><i></i><i></i><i></i></span></div></div>` : ''}</div>
     <form class="as-composer js-composer">
       <label class="sr-only" for="as-message">Message</label>
       <textarea class="textarea" id="as-message" name="message" placeholder="Paste an email or describe the shipment. For example: 3 lots of Paracetamol 500mg for assay, shipping Tuesday by FedEx." ${desk.busy ? raw('disabled') : ''}></textarea>
@@ -1058,11 +1098,21 @@ function mountDesk(root) {
     const before = history();
     desk.messages.push({ role: 'client', text });
     desk.busy = true;
+    desk.partial = '';
     desk.touched = new Set();
     renderChat();
     renderDraft();
+    const showPartialReply = (event) => {
+      if (event.type !== 'reply') return;
+      desk.partial = event.text;
+      const partial = $in('.js-partial');
+      if (!partial) return;
+      partial.textContent = event.text;
+      const thread = $in('.js-thread');
+      thread.scrollTop = thread.scrollHeight;
+    };
     try {
-      const res = await post('/assistant', { message: text, draft: desk.draft, history: before, declined: desk.declined, ...desk.choice });
+      const res = await postStreamed('/assistant', { message: text, draft: desk.draft, history: before, declined: desk.declined, ...desk.choice }, showPartialReply);
       const editedMeanwhile = desk.touched.size > 0;
       desk.draft = keepTouched(res.draft);
       // A proposal belongs to the turn that asked it; the new reply asks again whatever is still open.
