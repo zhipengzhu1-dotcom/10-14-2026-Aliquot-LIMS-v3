@@ -174,7 +174,6 @@ const SUBMISSION_STEPS = [
   { status: 'Acknowledged', title: 'Lab is expecting it', sub: 'We confirm the shipment and watch for it', at: 'acknowledged_at' },
   { status: 'Received', title: 'Box received', sub: 'Samples are logged and checked in', at: 'received_at' },
 ];
-const PRIORITY_HINT = { 'Same day': 'Results the day your samples arrive. Costs the most', 'Next day': 'Results the working day after arrival. Costs more', '3 days': 'Results within three working days. Costs a little more', 'One week': 'Our normal turnaround: five working days' };
 const REQ_TONE = { Submitted: 'info', 'Under review': 'accent', 'Proposal sent': 'warn', Accepted: 'ok', Declined: 'bad' };
 
 const pill = (label, tone = '') => html`<span class="pill ${tone}">${label}</span>`;
@@ -408,7 +407,7 @@ async function route() {
     else if (a === 'samples' && b) view = await sampleDetail(+b);
     else if (a === 'samples') view = await samplesList(query.tab || 'open');
     else if (a === 'coa' && b) view = await coaView(+b);
-    else if (a === 'submit') view = await submitForm();
+    else if (a === 'submit') view = await submitView();
     else if (a === 'submissions' && b) view = await submissionDetail(+b, query);
     else if (a === 'requests' && b === 'new') view = await requestForm();
     else if (a === 'requests' && b) view = await requestDetail(+b);
@@ -628,31 +627,6 @@ async function coaView(id) {
 // ---------------------------------------------------------------------------------------------
 
 const MAX_SAMPLES = 200;
-const SAMPLE_FIELDS = ['description', 'product_code', 'batch_no', 'client_ref', 'quantity', 'container', 'stage', 'priority'];
-const MORE_FIELDS = SAMPLE_FIELDS.slice(1);
-const MORE_LABEL = 'Add code, lot, stage, urgency, quantity';
-const asShipment = (tier) => `As shipment (${tier})`;
-
-/** One sample row. `v.problems` (from a paste) marks the cells the client still has to fix. */
-function sampleRow(v, lk, shipTier) {
-  const bad = v.problems || {};
-  const invalid = (name) => raw(bad[name] ? `aria-invalid="true" title="${esc(bad[name])}"` : '');
-  const more = (name, ph) => html`<input class="input" name="${`s.${name}`}" value="${v[name] || ''}" placeholder="${ph}" aria-label="${ph}" ${invalid(name)}>`;
-  const pick = (name, label, first, options) => html`<select class="select" name="${`s.${name}`}" aria-label="${label}" ${invalid(name)}>${first}${options.map((o) => html`<option ${o === v[name] ? raw('selected') : ''}>${o}</option>`)}</select>`;
-  const open = MORE_FIELDS.some((k) => v[k] || bad[k]);
-  return html`<li class="srow" data-row>
-    <div class="srow-main"><span class="n"></span><input class="input" name="s.description" value="${v.description || ''}" placeholder="What is it? e.g. Atorvastatin API, lot 2026-118" aria-label="Sample description" ${invalid('description')}><button class="btn btn-quiet btn-sm remove" type="button" aria-label="Remove sample">${ic('x', 15)}</button></div>
-    <div class="srow-more" ${open ? '' : raw('hidden')}>
-      ${more('product_code', 'Product code')}${more('batch_no', 'Batch / lot')}
-      ${pick('stage', 'Stage', html`<option value="">Stage</option>`, lk.stages)}
-      ${pick('priority', 'Urgency', html`<option value="" class="js-as-ship">${asShipment(shipTier)}</option>`, lk.priorities)}
-      ${more('quantity', 'Quantity, e.g. 100 tablets')}${more('client_ref', 'Your reference')}${more('container', 'Container')}
-    </div>
-    ${v.details?.length ? html`<p class="srow-extra"><span class="micro">From your sheet</span> ${v.details.map((d, i) => html`${i ? ' · ' : ''}<b>${d.label}</b> ${d.value}`)}<input type="hidden" name="s.details" value="${JSON.stringify(v.details)}"></p>` : ''}
-    <button class="linkish js-more" type="button">${open ? 'Hide details' : MORE_LABEL}</button>
-  </li>`;
-}
-
 const USE_LABEL = { extra: 'Keep as extra detail', ignore: 'Ignore' };
 
 /** One line per column of the client's sheet: its heading, two of its values, and what we read it as. */
@@ -699,234 +673,606 @@ function pastePreview(rows, mapping, plan, { fit }) {
     </table></div>`;
 }
 
-// Optional details hide behind "+ chips"; each chip opens its fields, and "Remove" clears them again so nothing hidden is sent.
-const EXTRAS = [
-  { key: 'project', chip: 'Project', when: (lk) => lk.projects.length, fields: (lk) => html`<label class="field"><span class="label">Project</span><select class="select" name="project_id"><option value="">No specific project</option>${lk.projects.map((p) => html`<option value="${p.id}">${p.code} · ${p.title}</option>`)}</select></label>` },
-  { key: 'sample_type', chip: 'Sample type', fields: (lk) => html`<label class="field"><span class="label">Sample type</span><select class="select" name="sample_type"><option value="">Choose</option>${lk.sampleTypes.map((t) => html`<option>${t}</option>`)}</select></label>` },
-  { key: 'storage', chip: 'Storage', fields: (lk) => html`<label class="field"><span class="label">Keep it at</span><select class="select" name="storage"><option value="">Choose</option>${lk.storageConditions.map((t) => html`<option>${t}</option>`)}</select></label>` },
-  { key: 'shipping', chip: 'Courier & tracking', fields: () => html`<div class="grid-3">
-    <label class="field"><span class="label">Courier</span><input class="input" name="courier" placeholder="e.g. FedEx Priority"></label>
-    <label class="field"><span class="label">Tracking number</span><input class="input" name="tracking_no"></label>
-    <label class="field"><span class="label">Ship date</span><input class="input" type="date" name="ship_date"></label>
-  </div>` },
-  { key: 'notes', chip: 'Note to lab', fields: () => html`<label class="field"><span class="label">Anything else we should know</span><textarea class="textarea" name="notes" placeholder="Handling, hazards, who to call"></textarea></label>` },
-];
+// The submission desk: a conversation with the assistant on the left, the draft it fills on the right. The draft is the
+// submission body, every value marked with where it came from. The client can edit any of it by hand, with the
+// assistant or without it, and only the client sends it.
 
-async function submitForm() {
+/** Where a value came from: what each source is called and what it means. Checked and guessed never look alike. */
+const SOURCES = {
+  client: { tag: 'from you', help: 'Taken from what you wrote' },
+  sheet: { tag: 'from sheet', help: 'Taken from your spreadsheet' },
+  guessed: { tag: 'guessed', help: 'The assistant guessed this. Check it.' },
+  fixed: { tag: 'fixed', help: 'Changed by an automatic check' },
+  default: { tag: 'default', help: 'The portal default' },
+  edited: { tag: 'you edited', help: 'You set or confirmed this' },
+};
+// Guesses that change how the lab handles the box; sending waits until the client confirms them (server/assistant.js).
+const MUST_CONFIRM = ['storage', 'ship_date'];
+const SHIP_FIELDS = [
+  ['project_id', 'Project', 'projects'], ['sample_type', 'Sample type', 'sampleTypes'], ['storage', 'Storage', 'storageConditions'],
+  ['priority', 'Turnaround', 'priorities'], ['courier', 'Courier', 'text'], ['tracking_no', 'Tracking number', 'text'],
+  ['ship_date', 'Ship date', 'date'], ['notes', 'Notes for the lab', 'area'],
+];
+const ROW_FIELDS = [
+  ['description', 'Sample name', 'text'], ['batch_no', 'Batch / lot', 'text'], ['product_code', 'Product code', 'text'], ['stage', 'Stage', 'stages'],
+  ['priority', 'Turnaround', 'tiers'], ['quantity', 'Quantity', 'text'], ['client_ref', 'Your reference', 'text'], ['container', 'Container', 'text'],
+];
+// The table leads with the batch, which stays in view while the other columns scroll sideways inside the table.
+const TABLE_FIELDS = ['batch_no', 'description', 'stage', 'priority', 'quantity', 'product_code', 'client_ref', 'container'].map((k) => ROW_FIELDS.find(([f]) => f === k));
+const TABLE_MIN = 560;
+const GREETING = 'Paste the shipping email or packing list, or attach your spreadsheet. I fill in the submission and mark what I checked and what I guessed. Nothing goes to the lab until you press Send to lab.';
+
+const blankRow = () => ({ description: null, product_code: null, batch_no: null, client_ref: null, quantity: null, container: null, stage: null, priority: null, details: [] });
+const blankDraft = (lk) => ({
+  project_id: null, sample_type: null, priority: lk.defaultPriority, storage: null, courier: null, tracking_no: null, ship_date: null, notes: null,
+  method_ids: [], samples: [blankRow()], provenance: { priority: { source: 'default' } }, questions: [],
+});
+const getAt = (o, path) => path.split('.').reduce((a, k) => a?.[k], o);
+function setAt(o, path, value) {
+  const keys = path.split('.');
+  const last = keys.pop();
+  keys.reduce((a, k) => a[k], o)[last] = value;
+}
+const bodyOf = ({ provenance, questions, ...body }) => body;
+const fid = (path) => `d-${path.replace(/\./g, '-')}`;
+const choiceLabel = (models, model, effort) => `${models.find((m) => m.id === model)?.label ?? model} · ${effort} effort`;
+
+// The conversation and draft in progress, kept while the client moves around the portal and dropped once sent.
+let desk = null;
+
+function newDesk(lk, assistant) {
+  return {
+    lk, assistant, draft: blankDraft(lk), gate: null, checking: false, busy: false, tab: 'chat', table: false,
+    choice: assistant.enabled ? { model: assistant.model, effort: assistant.effort } : null,
+    messages: assistant.enabled ? [{ role: 'assistant', text: GREETING }] : [],
+  };
+}
+
+const rowLabel = (path) => {
+  const m = /^samples\.(\d+)\.(\w+)$/.exec(path);
+  if (!m) return null;
+  const row = desk.draft.samples[+m[1]];
+  return `${row?.batch_no || `Sample ${+m[1] + 1}`} ${(ROW_FIELDS.find(([k]) => k === m[2])?.[1] ?? 'extra detail').toLowerCase()}`;
+};
+const labelOf = (path) => rowLabel(path) ?? SHIP_FIELDS.find(([k]) => k === path)?.[1] ?? { method_ids: 'Tests', samples: 'Samples' }[path] ?? path;
+
+function shown(path) {
+  const v = getAt(desk.draft, path);
+  if (path === 'project_id') return desk.lk.projects.find((p) => p.id === v)?.code ?? v;
+  if (path === 'method_ids') return v.map((id) => desk.lk.methods.find((m) => m.id === id)?.title ?? id).join(', ');
+  if (Array.isArray(v)) return v.map((d) => `${d.label}: ${d.value}`).join(', ');
+  return v;
+}
+
+const problemAt = (path) => desk.gate?.problems.find((p) => p.path === path);
+
+function provClass(path) {
+  const p = desk.draft.provenance[path];
+  return [problemAt(path) ? 'p-ask' : '', p ? `p-${p.source}` : ''].filter(Boolean).join(' ');
+}
+
+function provTag(path) {
+  const problem = problemAt(path);
+  if (problem) return html`<span class="ptag ask" title="${problem.message}">needs you</span>`;
+  const p = desk.draft.provenance[path];
+  if (!p) return '';
+  return html`<span class="ptag ${p.source}" title="${p.reason || SOURCES[p.source].help}">${SOURCES[p.source].tag}</span>`;
+}
+
+function control(path, kind, label) {
+  const lk = desk.lk;
+  const v = getAt(desk.draft, path);
+  const id = fid(path);
+  const lists = {
+    projects: [['', 'No specific project'], ...lk.projects.map((p) => [String(p.id), `${p.code} · ${p.title}`])],
+    sampleTypes: [['', 'Choose'], ...lk.sampleTypes.map((t) => [t, t])],
+    storageConditions: [['', 'Choose'], ...lk.storageConditions.map((t) => [t, t])],
+    priorities: lk.priorities.map((t) => [t, t]),
+    stages: [['', 'Choose'], ...lk.stages.map((t) => [t, t])],
+    tiers: [['', `As shipment (${desk.draft.priority})`], ...lk.priorities.map((t) => [t, t])],
+  }[kind];
+  if (lists) {
+    const value = v == null ? '' : String(v);
+    const options = lists.some(([o]) => o === value) ? lists : [...lists, [value, value]];
+    return html`<select class="select" id="${id}" data-path="${path}" aria-label="${label}">${options.map(([o, l]) => html`<option value="${o}" ${o === value ? raw('selected') : ''}>${l}</option>`)}</select>`;
+  }
+  if (kind === 'area') return html`<textarea class="textarea" id="${id}" data-path="${path}" rows="2" aria-label="${label}">${v ?? ''}</textarea>`;
+  return html`<input class="input" id="${id}" data-path="${path}" type="${kind === 'date' ? 'date' : 'text'}" value="${v ?? ''}" aria-label="${label}">`;
+}
+
+const fieldBox = (path, label, kind) => html`<div class="as-f ${provClass(path)}" data-field="${path}">
+  <label class="as-lab" for="${fid(path)}"><span>${label}</span><span class="js-tag">${provTag(path)}</span></label>${control(path, kind, label)}</div>`;
+
+const details = (row) => (row.details?.length ? html`<p class="srow-extra"><span class="micro">Extra detail</span> ${row.details.map((d, i) => html`${i ? ' · ' : ''}<b>${d.label}</b> ${d.value}`)}</p>` : '');
+
+function samplesTable(d) {
+  return html`<div class="table-wrap as-tbl"><table class="table"><thead><tr><th>#</th>${TABLE_FIELDS.map(([, l]) => html`<th>${l}</th>`)}<th><span class="sr-only">Remove</span></th></tr></thead>
+    <tbody>${d.samples.map((row, i) => html`<tr>
+      <td class="muted">${i + 1}</td>
+      ${TABLE_FIELDS.map(([k, l, kind]) => {
+        const path = `samples.${i}.${k}`;
+        const p = d.provenance[path];
+        const problem = problemAt(path);
+        return html`<td class="as-f ${provClass(path)}" data-field="${path}" title="${problem?.message ?? (p ? `${SOURCES[p.source].tag}: ${p.reason || SOURCES[p.source].help}` : '')}">${control(path, kind, `${l}, sample ${i + 1}`)}${k === 'description' ? details(row) : ''}</td>`;
+      })}
+      <td><button class="btn btn-quiet btn-sm" type="button" data-remove="${i}" aria-label="${`Remove sample ${i + 1}`}" ${desk.busy ? raw('disabled') : ''}>${ic('x', 15)}</button></td>
+    </tr>`)}</tbody></table></div>`;
+}
+
+function samplesCards(d) {
+  return html`<ol class="as-samples">${d.samples.map((row, i) => html`<li class="as-sample">
+    <div class="as-sample-head"><span class="as-idx">${i + 1}</span><span class="t">${[row.description, row.batch_no].filter(Boolean).join(' · ') || 'New sample'}</span>
+      <button class="btn btn-quiet btn-sm" type="button" data-remove="${i}" aria-label="${`Remove sample ${i + 1}`}" ${desk.busy ? raw('disabled') : ''}>Remove</button></div>
+    <div class="as-grid">${ROW_FIELDS.map(([k, l, kind]) => fieldBox(`samples.${i}.${k}`, l, kind))}</div>${details(row)}</li>`)}</ol>`;
+}
+
+/** One row per distinct guess: the same guess on three lots is one thing to check, not three. */
+function guessGroups() {
+  const groups = new Map();
+  for (const [path, p] of Object.entries(desk.draft.provenance)) {
+    if (p.source !== 'guessed') continue;
+    const field = /^samples\.\d+\.(\w+)$/.exec(path)?.[1] ?? path;
+    const value = shown(path);
+    const key = JSON.stringify([field, value, p.reason]);
+    if (!groups.has(key)) groups.set(key, { field, value, reason: p.reason, paths: [] });
+    groups.get(key).paths.push(path);
+  }
+  return [...groups.values()].map((g) => ({ ...g, label: g.paths.length > 1 ? `${ROW_FIELDS.find(([k]) => k === g.field)?.[1] ?? g.field} on ${g.paths.length} samples` : labelOf(g.paths[0]) }));
+}
+
+/** What stops Send to lab, in plain words: the gate's problems, then the guesses that change handling. */
+function blockers() {
+  if (!desk.gate) return ['the checks have not run yet'];
+  return [
+    ...desk.gate.problems.map((p) => (p.fix ? `${labelOf(p.path).toLowerCase()}: take the suggested value` : p.message)),
+    ...MUST_CONFIRM.filter((p) => desk.draft.provenance[p]?.source === 'guessed').map((p) => `confirm ${labelOf(p).toLowerCase()} (${shown(p)})`),
+    ...(desk.checking ? ['checking your changes'] : []),
+    ...(desk.busy ? ['the assistant is still drafting'] : []),
+  ];
+}
+
+function ledgerHtml() {
+  const problems = desk.gate?.problems ?? [];
+  const fixed = Object.entries(desk.draft.provenance).filter(([, p]) => p.source === 'fixed');
+  const guesses = guessGroups();
+  return html`<section class="card as-ledger" aria-label="Checks and guesses">
+    <div class="card-head"><h2>Before it goes</h2>${desk.gate ? (problems.length ? pill(plural(problems.length, 'thing') + ' for you', 'bad') : pill('all checks pass', 'ok')) : pill('checking', 'info')}</div>
+    <div class="as-cols">
+      <section><h3 class="micro">Checked</h3>
+        ${problems.length ? html`<ul class="as-list">${problems.map((p) => html`<li class="ask"><b>${labelOf(p.path)}</b><span>${p.message}</span>${p.fix ? html`<button class="btn btn-sm" type="button" data-fix="${p.path}">Use ${Array.isArray(p.fix.value) ? 'the tests you can order' : `“${p.fix.value}”`}</button>` : ''}</li>`)}</ul>` : ''}
+        ${fixed.length ? html`<ul class="as-list">${fixed.map(([path, p]) => html`<li class="fixed"><b>${labelOf(path)}</b><span>${p.reason}</span></li>`)}</ul>` : ''}
+        ${desk.gate && !problems.length ? html`<p class="small muted">Every check the lab runs on a submission passes.</p>` : ''}
+      </section>
+      <section><h3 class="micro">Guessed</h3>
+        ${guesses.length ? html`<ul class="as-list">${guesses.map((g) => html`<li class="guess"><b>${g.label} = ${g.value}</b>${MUST_CONFIRM.includes(g.field) ? pill('needed to send', 'bad') : ''}<span>${g.reason}</span><button class="btn btn-sm" type="button" data-confirm="${g.paths.join(' ')}">Looks right</button></li>`)}</ul>`
+          : html`<p class="small muted">Nothing guessed.</p>`}
+      </section>
+    </div>
+  </section>`;
+}
+
+function formHtml() {
+  const d = desk.draft;
+  const lk = desk.lk;
+  return html`<section class="card as-form" aria-label="Submission draft">
+    <div class="card-head"><h2>Submission draft</h2><span class="micro faint">Edit anything</span></div>
+    <div class="slip-sec"><h2><span class="step-n">01</span>Shipment</h2><div class="as-grid">${SHIP_FIELDS.map(([k, l, kind]) => fieldBox(k, l, kind))}</div></div>
+    <div class="slip-sec"><h2><span class="step-n">02</span>Tests you are ordering <span class="js-tag" data-tag="method_ids">${provTag('method_ids')}</span></h2>
+      <div class="chips">${lk.methods.map((m) => html`<label class="chip" title="${`${m.code} · ${m.technique}`}"><input type="checkbox" data-method="${m.id}" ${d.method_ids.includes(m.id) ? raw('checked') : ''}><span>${m.title}</span></label>`)}</div></div>
+    <div class="slip-sec"><h2><span class="step-n">03</span>Samples <span class="micro faint">${d.samples.length} of ${MAX_SAMPLES} max</span></h2>
+      ${desk.table ? samplesTable(d) : samplesCards(d)}
+      <div class="row wrap" style="margin-top:10px"><button class="btn btn-sm" type="button" data-add ${d.samples.length >= MAX_SAMPLES || desk.busy ? raw('disabled') : ''}>${ic('plus', 15)} Add a sample</button>
+        <button class="linkish js-paste" type="button">Add from a spreadsheet</button></div></div>
+    <div class="as-legend"><span class="micro">Key</span>${Object.entries(SOURCES).map(([k, s]) => html`<span class="ptag ${k}" title="${s.help}">${s.tag}</span>`)}<span class="ptag ask">needs you</span></div>
+  </section>`;
+}
+
+function sendHtml() {
+  const d = desk.draft;
+  const named = d.samples.filter((r) => r.description).length;
+  const block = blockers();
+  const soft = Object.entries(d.provenance).filter(([p, v]) => v.source === 'guessed' && !MUST_CONFIRM.includes(p)).length;
+  return html`<div class="send-bar as-send">
+    <div class="count"><b>${plural(named, 'sample')}</b> · ${plural(d.method_ids.length, 'test')}${d.project_id ? ` · ${shown('project_id')}` : ''}
+      <span class="as-hint ${block.length ? 'block' : ''}">${block.length ? `Not ready to send. Still needed: ${block.join('; ')}.` : 'Ready. The lab sees it once you send.'}</span>
+      ${soft ? html`<span class="as-hint">${plural(soft, 'other guess', 'other guesses')} unconfirmed. ${soft === 1 ? 'It does' : 'They do'} not hold up sending.</span>` : ''}</div>
+    <div class="form-error"></div>
+    <button class="btn btn-primary js-send" type="button" ${block.length || desk.sending ? raw('disabled') : ''}>${ic('send', 16)} Send to lab</button>
+  </div>`;
+}
+
+function messageHtml(m, i) {
+  if (m.role === 'note') return html`<div class="msg system"><div class="bubble">${m.text}</div></div>`;
+  if (m.role === 'client') return html`<div class="msg client"><div class="meta">You</div><div class="bubble">${m.text}</div></div>`;
+  return html`<div class="msg lab as-reply"><div class="meta">Assistant${m.meta ? html` · <span class="js-answered-by">${m.meta}</span>` : ''}</div><div class="bubble"><span class="as-text">${m.text}</span>
+    ${m.unresolved?.length ? html`<div class="as-q"><b>Still open after ${plural(m.attempts, 'try', 'tries')}:</b> ${m.unresolved.map((p) => p.message).join('; ')}</div>` : ''}
+    ${(m.questions ?? []).map((q, qi) => html`<div class="as-q"><b>${q.text}</b>${q.options.length ? html`<div class="as-choices">${q.options.map((o) => html`<button class="as-choice" type="button" data-answer="${`${i}:${qi}`}" data-value="${o}" ${q.answered ? raw('disabled') : ''} aria-pressed="${String(q.answered === o)}">${o}</button>`)}</div>` : ''}</div>`)}</div></div>`;
+}
+
+function chatHtml() {
+  const a = desk.assistant;
+  const head = html`<div class="card-head as-chat-head"><h2>Assistant</h2>
+    ${a.enabled ? html`<select class="select as-pick js-pick" aria-label="Model and effort">${a.choices.models.flatMap((m) => a.choices.efforts.map((e) => html`<option value="${`${m.id}|${e}`}" ${m.id === desk.choice.model && e === desk.choice.effort ? raw('selected') : ''}>${choiceLabel(a.choices.models, m.id, e)}</option>`))}</select>` : ''}
+    <span class="micro faint">Drafts only. Never sends.</span></div>`;
+  if (!a.enabled) {
+    return html`<section class="card as-chat">${head}<div class="msgs as-thread"><div class="as-off">${ic('info', 18)}<div><b>${a.error ? 'The assistant could not be reached.' : 'The assistant is off.'}</b>
+      <p>${a.error ?? 'Your lab has not turned it on.'} Fill in the submission by hand. It is checked the same way, and you can attach a spreadsheet.</p></div></div></div></section>`;
+  }
+  return html`<section class="card as-chat">${head}
+    <div class="msgs as-thread js-thread" aria-live="polite">${desk.messages.map(messageHtml)}${desk.busy ? html`<div class="msg lab"><div class="meta">Assistant</div><div class="bubble"><span class="as-typing" aria-label="The assistant is drafting"><i></i><i></i><i></i></span></div></div>` : ''}</div>
+    <form class="as-composer js-composer">
+      <label class="sr-only" for="as-message">Message</label>
+      <textarea class="textarea" id="as-message" name="message" placeholder="Paste an email or describe the shipment. For example: 3 lots of Paracetamol 500mg for assay, shipping Tuesday by FedEx." ${desk.busy ? raw('disabled') : ''}></textarea>
+      <div class="row wrap"><button class="btn btn-sm js-paste" type="button">${ic('upload', 15)} Attach spreadsheet</button><span class="small muted as-kbd">Ctrl+Enter sends</span>
+        <button class="btn btn-primary btn-sm" type="submit" ${desk.busy ? raw('disabled') : ''}>Send message</button></div>
+    </form></section>`;
+}
+
+const pasteHtml = () => html`<section class="card as-paste paste" hidden aria-label="Add from a spreadsheet">
+  <div class="card-head"><h2>Add from a spreadsheet</h2><button class="btn btn-quiet btn-sm js-paste-close" type="button">Close</button></div>
+  <div class="card-pad">
+    <label class="field"><span class="label">Paste rows from Excel or Google Sheets</span><textarea class="textarea js-paste-text" rows="4" placeholder="Copy the rows, header row included, and paste them here"></textarea></label>
+    <div class="row wrap paste-file"><label class="btn btn-sm">${ic('upload', 15)} Upload .xlsx or .csv<input class="js-file" type="file" accept=".xlsx,.csv" hidden></label><span class="small muted js-file-name"></span></div>
+    <p class="slip-sub">We match your columns to ours and show what we found below; change any that are wrong. Columns we have no place for are kept as extra detail for the lab.</p>
+    <div class="js-sheet-pick"></div><div class="js-map"></div><div class="js-preview" role="status"></div><p class="help js-paste-note" role="status"></p>
+    <button class="btn btn-sm btn-primary js-paste-add" type="button" hidden></button>
+  </div></section>`;
+
+async function submitView() {
   const lk = await lookups();
-  const extras = EXTRAS.filter((x) => !x.when || x.when(lk));
+  let assistant;
+  try {
+    assistant = await api('/assistant');
+  } catch (e) {
+    if (e.handled) throw e;
+    assistant = { enabled: false, error: e.message };
+  }
+  if (!desk) desk = newDesk(lk, assistant);
+  desk.lk = lk;
+  desk.assistant = assistant;
+  if (assistant.enabled && !desk.choice) desk.choice = { model: assistant.model, effort: assistant.effort };
+  if (!assistant.enabled) desk.tab = 'draft';
   return {
     title: 'Submit samples',
-    html: html`
-      <div class="page-head"><div><div class="eyebrow">New shipment</div><h1>Tell us what is coming</h1><p class="sub">Only the sample names are required. Everything else helps us be ready faster.</p></div></div>
-      <form class="card slip" id="submission" novalidate>
-        <section class="slip-sec">
-          <h2><span class="step-n">01</span>What is in the box</h2>
-          <p class="slip-sub">One line per sample, or paste the rows straight from your spreadsheet.</p>
-          <ol class="srows js-rows">${sampleRow({}, lk, lk.defaultPriority)}</ol>
-          <div class="row wrap">
-            <button class="btn btn-sm js-add" type="button">${ic('plus', 15)} Add another sample</button>
-            <button class="linkish js-paste" type="button">Paste or upload a spreadsheet</button>
-          </div>
-          <div class="paste" hidden>
-            <label class="field"><span class="label">Paste rows from Excel or Google Sheets</span><textarea class="textarea js-paste-text" rows="4" placeholder="Copy the rows, header row included, and paste them here"></textarea></label>
-            <div class="row wrap paste-file"><label class="btn btn-sm">${ic('upload', 15)} Upload .xlsx or .csv<input class="js-file" type="file" accept=".xlsx,.csv" hidden></label><span class="small muted js-file-name"></span></div>
-            <p class="slip-sub">We match your columns to ours and show what we found below; change any that are wrong. Columns we have no place for are kept as extra detail for the lab. One sample name per line works too.</p>
-            <div class="js-sheet-pick"></div>
-            <div class="js-map"></div>
-            <div class="js-preview" role="status"></div>
-            <p class="help js-paste-note" role="status"></p>
-            <div class="row wrap"><button class="btn btn-sm btn-primary js-paste-add" type="button" hidden></button><button class="btn btn-sm btn-quiet js-paste-close" type="button">Close</button></div>
-          </div>
-        </section>
-        <section class="slip-sec">
-          <h2><span class="step-n">02</span>What should we test</h2>
-          <p class="slip-sub">Pick any that apply, or leave it to the project plan.</p>
-          ${lk.methods.length > 6 ? html`<input class="input js-filter" type="search" placeholder="Filter tests" aria-label="Filter tests" style="margin-bottom:10px">` : ''}
-          <div class="chips">${lk.methods.map((m) => html`<label class="chip" data-text="${`${m.code} ${m.title} ${m.technique}`.toLowerCase()}" title="${`${m.code} · ${m.technique}${m.tat_days ? ` · typically ${m.tat_days} working days` : ''}`}"><input type="checkbox" name="method_ids" data-list="1" value="${m.id}"><span>${m.title}</span></label>`)}</div>
-        </section>
-        <section class="slip-sec">
-          <h2><span class="step-n">03</span>How fast</h2>
-          <div class="seg" role="radiogroup" aria-label="Turnaround">${lk.priorities.map((p) => html`<label><input type="radio" name="priority" value="${p}" ${p === lk.defaultPriority ? raw('checked') : ''}><span>${p}</span></label>`)}</div>
-          <p class="slip-sub js-priority-hint" style="margin:8px 0 0">${PRIORITY_HINT[lk.defaultPriority]}</p>
-        </section>
-        <section class="slip-sec">
-          <h2><span class="step-n">04</span>Anything else? <span class="opt">optional</span></h2>
-          <div class="extras">${extras.map((x) => html`<fieldset class="extra" data-extra="${x.key}" hidden><div class="extra-head"><span class="micro">${x.chip}</span><button class="linkish js-hide" type="button">Remove</button></div>${x.fields(lk)}</fieldset>`)}</div>
-          <div class="chips">${extras.map((x) => html`<button class="chip chip-add" type="button" data-show="${x.key}">+ ${x.chip}</button>`)}</div>
-        </section>
-        <div class="send-bar">
-          <span class="count js-count"></span>
-          <div class="form-error"></div>
-          <a class="btn btn-quiet" href="#/">Cancel</a>
-          <button class="btn btn-primary" type="submit">${ic('send', 16)} Send to lab</button>
-        </div>
-      </form>`,
-    mount(root) {
-      const form = $('#submission', root);
-      const rows = $('.js-rows', form);
-      const allRows = () => $$('[data-row]', rows);
-      const readRow = (r) => {
-        const details = $('[name="s.details"]', r);
-        return { ...Object.fromEntries(SAMPLE_FIELDS.map((k) => [k, $(`[name="s.${k}"]`, r).value.trim()])), ...(details ? { details: JSON.parse(details.value) } : {}) };
-      };
-      const update = () => {
-        const list = allRows();
-        list.forEach((r, i) => { $('.n', r).textContent = i + 1; $('.remove', r).hidden = list.length === 1; });
-        $('.js-add', form).disabled = list.length >= MAX_SAMPLES;
-        const n = list.filter((r) => $('[name="s.description"]', r).value.trim()).length;
-        const tests = $$('[name=method_ids]:checked', form).length;
-        $('.js-count', form).innerHTML = String(n ? html`<b>${plural(n, 'sample')}</b>${tests ? ` · ${plural(tests, 'test')}${n > 1 ? ' on each' : ''}` : ''}` : html`Name at least one sample to send`);
-      };
-      const shipTier = () => $('[name=priority]:checked', form)?.value || lk.defaultPriority;
-      const addRows = (values) => {
-        rows.insertAdjacentHTML('beforeend', values.map((v) => String(sampleRow(v, lk, shipTier()))).join(''));
-        update();
-      };
-      update();
-      form.addEventListener('input', update);
-      $('.js-add', form).addEventListener('click', () => {
-        addRows([{}]);
-        $('[name="s.description"]', allRows().at(-1)).focus();
-      });
-      rows.addEventListener('click', (e) => {
-        const row = e.target.closest('[data-row]');
-        if (e.target.closest('.remove')) { row.remove(); update(); return; }
-        if (e.target.closest('.js-more')) {
-          const more = $('.srow-more', row);
-          more.hidden = !more.hidden;
-          e.target.textContent = more.hidden ? MORE_LABEL : 'Hide details';
-          if (!more.hidden) $('input', more).focus();
-        }
-      });
-      const box = $('.js-paste-text', form);
-      const blankRows = () => allRows().filter((r) => !Object.values(readRow(r)).some(Boolean));
-      let sheet = null; // { grid, mapping, rows, plan }: the pasted or uploaded rows not yet added
-      let book = []; // the uploaded file's sheets, when a workbook has several
-      const load = (grid) => {
-        sheet = grid.length ? { grid, mapping: guessMapping(grid, PORTAL_FIELDS) } : null;
-        preview();
-      };
-      const loadBook = (sheets, pick = 0) => {
-        book = sheets;
-        $('.js-sheet-pick', form).innerHTML = sheets.length > 1 ? String(html`<label class="field"><span class="label">Sheet</span><select class="select js-sheet">${sheets.map((x, i) => html`<option value="${i}" ${i === pick ? raw('selected') : ''}>${x.name}</option>`)}</select></label>`) : '';
-        load(sheets[pick]?.rows ?? []);
-        if (sheets[pick]?.truncated) $('.js-paste-note', form).textContent = 'This sheet is longer than we read in one go: only its first 400 rows and 40 columns are shown.';
-      };
-      const preview = () => {
-        if (sheet) {
-          sheet.rows = readSheet(sheet.grid, sheet.mapping).rows;
-          sheet.plan = planTests(sheet.rows, lk.methods);
-        }
-        const rows = sheet?.rows ?? [];
-        const fit = MAX_SAMPLES - allRows().length + blankRows().length;
-        $('.js-map', form).innerHTML = sheet ? String(mapPanel(sheet.grid, sheet.mapping)) : '';
-        $('.js-preview', form).innerHTML = sheet ? String(pastePreview(rows, sheet.mapping, sheet.plan, { fit })) : '';
-        const add = $('.js-paste-add', form);
-        const n = Math.min(rows.length, fit);
-        add.hidden = n === 0;
-        add.textContent = `Add ${plural(n, 'sample')}`;
-        $('.js-paste-note', form).textContent = '';
-      };
-      const openPaste = () => { $('.paste', form).hidden = false; box.focus(); };
-      $('.js-paste', form).addEventListener('click', openPaste);
-      $('.js-paste-close', form).addEventListener('click', () => { $('.paste', form).hidden = true; });
-      box.addEventListener('input', () => { book = []; $('.js-sheet-pick', form).innerHTML = ''; $('.js-file-name', form).textContent = ''; load(gridFromText(box.value, 'paste')); });
-      $('.js-file', form).addEventListener('change', async (e) => {
-        const file = e.target.files[0];
-        e.target.value = '';
-        if (!file) return;
-        box.value = '';
-        $('.js-file-name', form).textContent = file.name;
-        try {
-          loadBook(await sheetsFromFile(file));
-        } catch (err) {
-          if (err.handled) return;
-          loadBook([]);
-          $('.js-paste-note', form).textContent = err.message;
-        }
-      });
-      $('.js-sheet-pick', form).addEventListener('change', (e) => loadBook(book, Number(e.target.value)));
-      $('.js-map', form).addEventListener('change', (e) => {
-        if (e.target.matches('.js-use')) sheet.mapping = remap(sheet.mapping, Number(e.target.dataset.col), e.target.value);
-        if (e.target.matches('.js-header')) sheet.mapping = withHeader(sheet.grid, sheet.mapping, e.target.checked);
-        preview();
-      });
-      // Excel puts tabs between the cells of a multi-cell copy; dropped into one name box they would make one long name.
-      rows.addEventListener('paste', (e) => {
-        const text = e.clipboardData?.getData('text/plain') || '';
-        if (!e.target.matches('[name="s.description"]') || !text.includes('\t')) return;
-        e.preventDefault();
-        box.value = text;
-        openPaste();
-        load(gridFromText(text, 'paste'));
-        $('.paste', form).scrollIntoView({ block: 'nearest' });
-      });
-      $('.js-paste-add', form).addEventListener('click', () => {
-        blankRows().forEach((r) => r.remove());
-        const fit = MAX_SAMPLES - allRows().length;
-        const { rows: taken, plan, grid, mapping } = sheet;
-        addRows(taken.slice(0, fit).map(({ test, ...r }) => r));
-        if (!allRows().length) addRows([{}]);
-        for (const id of plan.methodIds) {
-          const chip = $(`[name=method_ids][value="${id}"]`, form);
-          if (chip) chip.checked = true;
-        }
-        const left = taken.length - fit;
-        box.value = '';
-        sheet = left > 0 ? { grid: dropRows(grid, mapping, fit), mapping } : null;
-        preview();
-        $('.js-paste-note', form).textContent = left > 0 ? `Only ${MAX_SAMPLES} samples fit in one submission. ${plural(left, 'row was', 'rows were')} not added.` : '';
-        $('.paste', form).hidden = left <= 0;
-        update();
-      });
-      $('.js-filter', form)?.addEventListener('input', (e) => { const q = e.target.value.trim().toLowerCase(); $$('.chips .chip[data-text]', form).forEach((l) => { l.hidden = q && !l.dataset.text.includes(q); }); });
-      form.addEventListener('change', (e) => {
-        if (e.target.name === 'priority') {
-          $('.js-priority-hint', form).textContent = PRIORITY_HINT[e.target.value] || '';
-          $$('.js-as-ship', form).forEach((o) => { o.textContent = asShipment(e.target.value); });
-        }
-        if (e.target.matches('[aria-invalid]')) { e.target.removeAttribute('aria-invalid'); e.target.removeAttribute('title'); }
-      });
-      form.addEventListener('click', (e) => {
-        const show = e.target.closest('[data-show]');
-        if (show) {
-          show.hidden = true;
-          const box = $(`[data-extra="${show.dataset.show}"]`, form);
-          box.hidden = false;
-          $('input, select, textarea', box).focus();
-        }
-        const hide = e.target.closest('.js-hide');
-        if (hide) {
-          const box = hide.closest('[data-extra]');
-          $$('input, select, textarea', box).forEach((el) => { el.value = ''; });
-          box.hidden = true;
-          $(`[data-show="${box.dataset.extra}"]`, form).hidden = false;
-        }
-      });
-      form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const d = formData(form);
-        const rows = allRows();
-        const samples = rows.map(readRow).filter((r) => Object.values(r).some(Boolean));
-        const unnamed = rows.findIndex((row) => { const r = readRow(row); return !r.description && Object.values(r).some(Boolean); });
-        $$('[name="s.description"]', form).forEach((el) => el.removeAttribute('aria-invalid'));
-        if (unnamed >= 0 && samples.some((r) => r.description)) {
-          const el = $('[name="s.description"]', rows[unnamed]);
-          el.setAttribute('aria-invalid', 'true');
-          el.focus();
-          $('.form-error', form).innerHTML = String(html`<div class="alert alert-bad" role="alert">${ic('alert', 16)}<span>Sample #${unnamed + 1} needs a description.</span></div>`);
-          return;
-        }
-        const body = { project_id: d.project_id || null, sample_type: d.sample_type || null, storage: d.storage || null, priority: d.priority, courier: d.courier, tracking_no: d.tracking_no, ship_date: d.ship_date || null, notes: d.notes, method_ids: (d.method_ids || []).map(Number), samples };
-        const res = await submitting(form, async () => {
-          if (!samples.some((r) => r.description)) throw new Error('Tell us what at least one sample is.');
-          return post('/submissions', body);
-        }, 'Sending');
-        if (res) location.hash = `#/submissions/${res.id}?sent=1`;
-      });
-    },
+    html: html`<div class="page-head"><div><div class="eyebrow">New shipment</div><h1>Tell us what is coming</h1>
+        <p class="sub">${assistant.enabled ? 'Paste the email, a packing list or a spreadsheet. The assistant fills in the submission as you talk. You review it and send it.' : 'Fill in what you are sending. Only the sample names are required.'} Nothing reaches the lab until you press Send to lab.</p></div></div>
+      <div class="as-desk" data-tab="${desk.tab}">
+        <div class="as-tabs" role="group" aria-label="View"><button type="button" data-tab="chat">Conversation</button><button type="button" data-tab="draft">Submission <span class="as-count js-count" hidden></span></button></div>
+        <div class="as-chat-col js-chat"></div>
+        <div class="as-draft-col"><div class="js-ledger"></div><div class="js-form"></div>${pasteHtml()}<div class="js-sendbar"></div></div>
+      </div>`,
+    mount: mountDesk,
   };
+}
+
+function mountDesk(root) {
+  const $in = (sel) => $(sel, root);
+  const deskEl = $in('.as-desk');
+  const draftCol = $in('.as-draft-col');
+  let timer = null;
+  let seq = 0;
+
+  const renderTabs = () => {
+    deskEl.dataset.tab = desk.tab;
+    $$('.as-tabs [data-tab]', root).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tab === desk.tab)));
+    const n = blockers().length;
+    const count = $in('.js-count');
+    count.hidden = !n || !desk.gate;
+    count.textContent = n;
+  };
+  const renderChat = () => {
+    $in('.js-chat').innerHTML = String(chatHtml());
+    const thread = $in('.js-thread');
+    if (thread) thread.scrollTop = thread.scrollHeight;
+  };
+  const renderChecks = () => {
+    $in('.js-ledger').innerHTML = String(ledgerHtml());
+    $in('.js-sendbar').innerHTML = String(sendHtml());
+    $$('[data-field]', root).forEach((el) => {
+      const path = el.dataset.field;
+      el.className = `as-f ${provClass(path)}`;
+      const tag = $('.js-tag', el);
+      if (tag) tag.innerHTML = String(provTag(path));
+    });
+    const tests = $in('[data-tag=method_ids]');
+    if (tests) tests.innerHTML = String(provTag('method_ids'));
+    renderTabs();
+  };
+  const renderDraft = () => {
+    const focused = draftCol.contains(document.activeElement) ? document.activeElement.id : '';
+    desk.table = draftCol.clientWidth >= TABLE_MIN;
+    $in('.js-form').innerHTML = String(formHtml());
+    renderChecks();
+    const el = focused && document.getElementById(focused);
+    if (el) {
+      el.focus();
+      if (el.setSelectionRange && el.type === 'text') el.setSelectionRange(el.value.length, el.value.length);
+    }
+  };
+  // Every change runs the same checks the lab runs on a submission, without saving anything.
+  const check = () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const mine = ++seq;
+      try {
+        const gate = await post('/submissions/check', bodyOf(desk.draft));
+        if (mine === seq) Object.assign(desk, { gate, checking: false });
+      } catch (e) {
+        if (e.handled || mine !== seq) return;
+        Object.assign(desk, { gate: null, checking: false });
+      }
+      if (root.isConnected) renderChecks();
+    }, 250);
+  };
+  const changed = ({ structure = false } = {}) => {
+    desk.checking = true;
+    if (structure) renderDraft();
+    else renderChecks();
+    check();
+  };
+  const mark = (path, source, reason) => {
+    desk.draft.provenance[path] = { source, ...(reason ? { reason } : {}) };
+    desk.touched?.add(path);
+  };
+  // The draft stays editable while the assistant drafts, with its rows fixed. What the client changed in that time keeps
+  // the client's value and provenance over the reply's.
+  const keepTouched = (reply) => {
+    for (const path of desk.touched) {
+      const row = /^samples\.(\d+)\./.exec(path)?.[1];
+      while (row != null && reply.samples.length <= Number(row)) reply.samples.push(blankRow());
+      setAt(reply, path, structuredClone(getAt(desk.draft, path)));
+      reply.provenance[path] = desk.draft.provenance[path];
+    }
+    return reply;
+  };
+
+  renderChat();
+  renderDraft();
+  check();
+  new ResizeObserver(() => {
+    if (!root.contains(draftCol)) return;
+    const wide = draftCol.clientWidth >= TABLE_MIN;
+    if (draftCol.clientWidth && wide !== desk.table && !draftCol.contains(document.activeElement)) renderDraft();
+  }).observe(draftCol);
+
+  const history = () => desk.messages.filter((m) => m.role === 'client' || m.role === 'assistant').map((m) => ({ role: m.role, text: m.text }));
+  async function ask(text) {
+    if (desk.busy || !text.trim()) return;
+    const before = history();
+    desk.messages.push({ role: 'client', text });
+    desk.busy = true;
+    desk.touched = new Set();
+    renderChat();
+    renderDraft();
+    try {
+      const res = await post('/assistant', { message: text, draft: desk.draft, history: before, ...desk.choice });
+      const editedMeanwhile = desk.touched.size > 0;
+      desk.draft = keepTouched(res.draft);
+      desk.gate = editedMeanwhile ? null : res.gate;
+      desk.messages.push({
+        role: 'assistant', text: res.reply, questions: res.draft.questions, attempts: res.attempts, unresolved: res.unresolved,
+        meta: `${res.model_label} · ${res.effort} effort · ${(res.ms / 1000).toFixed(1)} s${res.attempts > 1 ? ` · ${res.attempts} tries` : ''}`,
+      });
+      check();
+    } catch (e) {
+      if (e.handled) return;
+      desk.messages.push({ role: 'note', text: `${e.message} You can keep filling in the submission by hand.` });
+    } finally {
+      desk.busy = false;
+      desk.touched = null;
+      if (root.isConnected) {
+        renderChat();
+        renderDraft();
+        if (!draftCol.contains(document.activeElement)) $in('#as-message')?.focus();
+      }
+    }
+  }
+
+  $in('.js-chat').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const box = $in('#as-message');
+    const text = box.value;
+    box.value = '';
+    ask(text);
+  });
+  $in('.js-chat').addEventListener('keydown', (e) => {
+    if (e.target.id === 'as-message' && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $in('.js-composer').requestSubmit();
+  });
+  $in('.js-chat').addEventListener('change', (e) => {
+    if (!e.target.matches('.js-pick')) return;
+    const [model, effort] = e.target.value.split('|');
+    desk.choice = { model, effort };
+  });
+  $in('.js-chat').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-answer]');
+    if (!b || b.disabled) return;
+    const [mi, qi] = b.dataset.answer.split(':').map(Number);
+    desk.messages[mi].questions[qi].answered = b.dataset.value;
+    ask(b.dataset.value);
+  });
+  $in('.as-tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-tab]');
+    if (b) { desk.tab = b.dataset.tab; renderTabs(); }
+  });
+
+  const setValue = (el) => {
+    const path = el.dataset.path;
+    const value = el.value.trim() ? el.value.trim() : null;
+    setAt(desk.draft, path, path === 'project_id' && value ? Number(value) : value);
+    mark(path, 'edited');
+  };
+  draftCol.addEventListener('input', (e) => {
+    if (!e.target.dataset.path || e.target.tagName === 'SELECT') return;
+    setValue(e.target);
+    changed();
+  });
+  draftCol.addEventListener('change', (e) => {
+    const el = e.target;
+    if (el.dataset.path) {
+      setValue(el);
+      changed({ structure: el.dataset.path === 'priority' });
+    } else if (el.dataset.method) {
+      const id = Number(el.dataset.method);
+      desk.draft.method_ids = el.checked ? [...desk.draft.method_ids, id] : desk.draft.method_ids.filter((x) => x !== id);
+      mark('method_ids', 'edited');
+      changed();
+    }
+  });
+  draftCol.addEventListener('click', async (e) => {
+    const d = desk.draft;
+    const confirm = e.target.closest('[data-confirm]');
+    if (confirm) {
+      confirm.dataset.confirm.split(' ').forEach((path) => mark(path, 'edited', 'You confirmed this.'));
+      changed({ structure: true });
+      return;
+    }
+    const fix = e.target.closest('[data-fix]');
+    if (fix) {
+      const problem = problemAt(fix.dataset.fix);
+      setAt(d, problem.path, problem.fix.value);
+      mark(problem.path, 'fixed', 'You took the value the check suggested.');
+      changed({ structure: true });
+      return;
+    }
+    const remove = e.target.closest('[data-remove]');
+    if (remove) {
+      const i = Number(remove.dataset.remove);
+      d.samples.splice(i, 1);
+      if (!d.samples.length) d.samples.push(blankRow());
+      d.provenance = Object.fromEntries(Object.entries(d.provenance).flatMap(([path, p]) => {
+        const m = /^samples\.(\d+)\.(.+)$/.exec(path);
+        if (!m) return [[path, p]];
+        const n = Number(m[1]);
+        return n === i ? [] : [[`samples.${n > i ? n - 1 : n}.${m[2]}`, p]];
+      }));
+      changed({ structure: true });
+      return;
+    }
+    if (e.target.closest('[data-add]')) {
+      d.samples.push(blankRow());
+      changed({ structure: true });
+      $(`#${fid(`samples.${d.samples.length - 1}.description`)}`, root)?.focus();
+      return;
+    }
+    if (e.target.closest('.js-send')) {
+      const btn = e.target.closest('.js-send');
+      if (blockers().length || desk.sending) return;
+      desk.sending = true;
+      btn.disabled = true;
+      try {
+        const res = await post('/submissions', bodyOf(d));
+        desk = null;
+        location.hash = `#/submissions/${res.id}?sent=1`;
+      } catch (err) {
+        if (err.handled) return;
+        $in('.js-sendbar .form-error').innerHTML = String(html`<div class="alert alert-bad" role="alert">${ic('alert', 16)}<span>${err.message}</span></div>`);
+        desk.sending = false;
+        if (btn.isConnected) btn.disabled = false;
+      }
+    }
+  });
+
+  // Spreadsheets are read here and on the server as before; their rows join the draft marked "from sheet".
+  const panel = $in('.as-paste');
+  const box = $('.js-paste-text', panel);
+  let sheet = null;
+  let book = [];
+  let fileName = 'pasted rows';
+  const blank = (r) => !ROW_FIELDS.some(([k]) => r[k]) && !r.details?.length;
+  const preview = () => {
+    if (sheet) {
+      sheet.rows = readSheet(sheet.grid, sheet.mapping).rows;
+      sheet.plan = planTests(sheet.rows, desk.lk.methods);
+    }
+    const rows = sheet?.rows ?? [];
+    const fit = MAX_SAMPLES - desk.draft.samples.filter((r) => !blank(r)).length;
+    $('.js-map', panel).innerHTML = sheet ? String(mapPanel(sheet.grid, sheet.mapping)) : '';
+    $('.js-preview', panel).innerHTML = sheet ? String(pastePreview(rows, sheet.mapping, sheet.plan, { fit })) : '';
+    const add = $('.js-paste-add', panel);
+    const n = Math.min(rows.length, fit);
+    add.hidden = n === 0;
+    add.textContent = `Add ${plural(n, 'sample')}`;
+    $('.js-paste-note', panel).textContent = '';
+  };
+  const load = (grid) => {
+    sheet = grid.length ? { grid, mapping: guessMapping(grid, PORTAL_FIELDS) } : null;
+    preview();
+  };
+  const loadBook = (sheets, pick = 0) => {
+    book = sheets;
+    $('.js-sheet-pick', panel).innerHTML = sheets.length > 1 ? String(html`<label class="field"><span class="label">Sheet</span><select class="select js-sheet">${sheets.map((x, i) => html`<option value="${i}" ${i === pick ? raw('selected') : ''}>${x.name}</option>`)}</select></label>`) : '';
+    load(sheets[pick]?.rows ?? []);
+    if (sheets[pick]?.truncated) $('.js-paste-note', panel).textContent = 'This sheet is longer than we read in one go: only its first 400 rows and 40 columns are shown.';
+  };
+  root.addEventListener('click', (e) => {
+    if (e.target.closest('.js-paste')) {
+      panel.hidden = false;
+      desk.tab = 'draft';
+      renderTabs();
+      panel.scrollIntoView({ block: 'nearest' });
+      box.focus();
+    }
+    if (e.target.closest('.js-paste-close')) panel.hidden = true;
+  });
+  box.addEventListener('input', () => { book = []; fileName = 'pasted rows'; $('.js-sheet-pick', panel).innerHTML = ''; $('.js-file-name', panel).textContent = ''; load(gridFromText(box.value, 'paste')); });
+  $('.js-file', panel).addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    box.value = '';
+    fileName = file.name;
+    $('.js-file-name', panel).textContent = file.name;
+    try {
+      loadBook(await sheetsFromFile(file));
+    } catch (err) {
+      if (err.handled) return;
+      loadBook([]);
+      $('.js-paste-note', panel).textContent = err.message;
+    }
+  });
+  $('.js-sheet-pick', panel).addEventListener('change', (e) => loadBook(book, Number(e.target.value)));
+  $('.js-map', panel).addEventListener('change', (e) => {
+    if (e.target.matches('.js-use')) sheet.mapping = remap(sheet.mapping, Number(e.target.dataset.col), e.target.value);
+    if (e.target.matches('.js-header')) sheet.mapping = withHeader(sheet.grid, sheet.mapping, e.target.checked);
+    preview();
+  });
+  $('.js-paste-add', panel).addEventListener('click', () => {
+    if (desk.busy) {
+      $('.js-paste-note', panel).textContent = 'The assistant is drafting. Add these rows once it replies.';
+      return;
+    }
+    const d = desk.draft;
+    const kept = d.samples.filter((r) => !blank(r));
+    const fit = MAX_SAMPLES - kept.length;
+    const { rows: taken, plan, grid, mapping } = sheet;
+    const added = taken.slice(0, fit);
+    const keptProvenance = Object.entries(d.provenance).filter(([path]) => {
+      const m = /^samples\.(\d+)\./.exec(path);
+      return !m || !blank(d.samples[+m[1]]);
+    });
+    d.samples = [...kept, ...added.map((r) => ({ ...blankRow(), ...Object.fromEntries(ROW_FIELDS.map(([k]) => [k, r[k] || null])), details: r.details }))];
+    d.provenance = Object.fromEntries(keptProvenance);
+    added.forEach((r, j) => {
+      for (const [k] of ROW_FIELDS) if (r[k]) mark(`samples.${kept.length + j}.${k}`, 'sheet');
+      if (r.details.length) mark(`samples.${kept.length + j}.details`, 'sheet');
+    });
+    const tests = plan.methodIds.filter((id) => !d.method_ids.includes(id));
+    if (tests.length) {
+      d.method_ids = [...d.method_ids, ...tests];
+      mark('method_ids', 'sheet');
+    }
+    const left = taken.length - added.length;
+    box.value = '';
+    sheet = left > 0 ? { grid: dropRows(grid, mapping, fit), mapping } : null;
+    preview();
+    $('.js-paste-note', panel).textContent = left > 0 ? `Only ${MAX_SAMPLES} samples fit in one submission. ${plural(left, 'row was', 'rows were')} not added.` : '';
+    panel.hidden = left <= 0;
+    if (desk.assistant.enabled) {
+      desk.messages.push({ role: 'note', text: `${plural(added.length, 'sample')} added from ${fileName}` });
+      renderChat();
+    }
+    changed({ structure: true });
+  });
 }
 
 /** The shipment's path to the lab, ending at Received; a Declined or Withdrawn submission stops after its last step. */
