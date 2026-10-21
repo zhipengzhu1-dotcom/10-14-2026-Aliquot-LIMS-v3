@@ -252,3 +252,27 @@ test('Tests on a Sample waiting for review are not counted as unassigned work, a
   assert.ok((await unassigned()).includes(tests[0].id));
   assert.deepEqual(await counts(), before.map((n) => n + 1), 'the Dashboard and Workload counts include it once accepted');
 });
+
+test('an analyst\'s Worklist lists no Test of a Sample that is Pending review or On hold, and lists it once accepted', async () => {
+  const priya = await staff('priya.raman');
+  const tom = await staff('tom.fletcher');
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const [pending, held] = await receive(['Worklist pending', 'Worklist held'], { due_date: yesterday });
+  await priya.ok('POST', `/api/samples/${held}/hold`, { reason: 'Which batch is this?' });
+  const testsOf = async (id) => (await priya.ok('GET', `/api/samples/${id}`)).tests.map((t) => t.id);
+  const [pendingTest] = await testsOf(pending);
+  const [heldTest] = await testsOf(held);
+
+  const listed = async (query) => (await tom.ok('GET', `/api/tests?${query}&limit=3000`)).map((t) => t.id);
+  for (const query of ['scope=open', 'scope=open&overdue=1', 'overdue=1', 'unassigned=1', 'work=assigned', `scope=open&method_id=${lab.kf}`]) {
+    const ids = await listed(query);
+    assert.ok(!ids.includes(pendingTest), `${query} leaves out a Test of a Pending review Sample`);
+    assert.ok(!ids.includes(heldTest), `${query} leaves out a Test of an On hold Sample`);
+  }
+  assert.ok((await listed('scope=open')).length > 0, 'the Worklist still lists work on accepted Samples');
+
+  await priya.ok('POST', `/api/samples/${pending}/accept`);
+  assert.ok((await listed('scope=open')).includes(pendingTest), 'listed once accepted');
+  assert.ok((await listed('overdue=1')).includes(pendingTest));
+  assert.ok(!(await listed('scope=open')).includes(heldTest), 'the held Sample stays out');
+});

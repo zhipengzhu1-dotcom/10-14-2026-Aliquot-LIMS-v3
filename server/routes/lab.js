@@ -320,6 +320,8 @@ export default function routes(r) {
     const where = [];
     const params = [];
     if (q.scope === 'open') { where.push(`t.status IN (${ph(TEST_OPEN)})`); params.push(...TEST_OPEN); }
+    // Tests on a Sample still waiting for intake review are not work yet, so no list of open or late work shows them.
+    if (q.scope === 'open' || q.overdue) { where.push('s.intake = ?'); params.push(INTAKE_ACCEPTED); }
     if (q.status) { const list = String(q.status).split(','); where.push(`t.status IN (${ph(list)})`); params.push(...list); }
     if (q.work) { const ids = workFilter(ctx, q.work, 'id'); where.push(`t.id IN (${ph(ids)})`); params.push(...ids); }
     if (q.analyst_id) { where.push('t.analyst_id = ?'); params.push(+q.analyst_id); }
