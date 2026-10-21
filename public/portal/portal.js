@@ -5,7 +5,7 @@
 import { html, raw, esc } from '/js/core/html.js';
 import { icon } from '/js/core/icons.js';
 import { snapshot, settle } from '/js/core/motion.js';
-import { FIELDS, PORTAL_FIELDS, gridFromText, guessMapping, remap, withHeader, readSheet, dropRows } from './sheet.js';
+import { PORTAL_FIELDS, gridFromText, guessMapping, readSheet } from './sheet.js';
 
 // ---------------------------------------------------------------------------------------------
 // Small helpers
@@ -667,22 +667,6 @@ async function coaView(id) {
 // ---------------------------------------------------------------------------------------------
 
 const MAX_SAMPLES = 200;
-const USE_LABEL = { extra: 'Keep as extra detail', ignore: 'Ignore' };
-
-/** One line per column of the client's sheet: its heading, two of its values, and what we read it as. */
-function mapPanel(grid, mapping) {
-  const body = grid.slice(mapping.header ? 1 : 0);
-  return html`<div class="map">
-    <label class="map-header"><input type="checkbox" class="js-header" ${mapping.header ? raw('checked') : ''}> First row is column headings</label>
-    <div class="map-cols">${mapping.columns.map((c, i) => html`<label class="map-col ${c.use === 'ignore' ? 'is-ignored' : ''}">
-      <span class="map-head">${c.label}</span>
-      <span class="map-eg">${body.map((r) => r[i]).filter(Boolean).slice(0, 2).join(' · ') || 'empty'}</span>
-      <select class="select js-use" data-col="${i}" aria-label="${`What ${c.label} is`}">
-        ${PORTAL_FIELDS.map((k) => html`<option value="${k}" ${c.use === k ? raw('selected') : ''}>${FIELDS[k].label}</option>`)}
-        ${Object.entries(USE_LABEL).map(([k, l]) => html`<option value="${k}" ${c.use === k ? raw('selected') : ''}>${l}</option>`)}
-      </select></label>`)}</div>
-  </div>`;
-}
 
 /** A .csv is read here; an .xlsx is read by the server, which already reads workbooks for the notebook. */
 async function sheetsFromFile(file) {
@@ -696,20 +680,6 @@ async function sheetsFromFile(file) {
   // Excel on Windows saves "CSV" in the Windows-1252 code page unless told to use UTF-8.
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { text = new TextDecoder('windows-1252').decode(bytes); }
   return [{ name: file.name, rows: gridFromText(text, 'csv'), truncated: false }];
-}
-
-/** The paste preview: every parsed row, with problem cells highlighted with their message. */
-function pastePreview(rows, mapping, { fit }) {
-  if (!rows.length) return '';
-  const cols = mapping.columns.map((c) => c.use).filter((use) => FIELDS[use]).map((k) => [k, FIELDS[k].label]);
-  const extra = rows.some((r) => r.details.length);
-  const flagged = rows.filter((r) => Object.keys(r.problems).length).length;
-  return html`
-    <p class="paste-sum"><b>${plural(rows.length, 'sample')}</b> found${flagged ? html` · <span class="bad-text">${plural(flagged, 'row needs', 'rows need')} a look</span>` : ' · all look good'}${mapping.header ? '' : ' · no heading row, read as your usual column order'}</p>
-    ${rows.length > fit ? html`<div class="alert alert-warn">${ic('alert', 16)}<span>Only ${plural(fit, 'more sample fits', 'more samples fit')} in this submission (${MAX_SAMPLES} at most). The rest stay here to send next time.</span></div>` : ''}
-    <div class="table-wrap paste-table"><table class="table"><thead><tr><th>#</th>${cols.map(([, l]) => html`<th>${l}</th>`)}${extra ? html`<th>Extra detail</th>` : ''}</tr></thead>
-      <tbody>${rows.map((r, i) => html`<tr><td class="muted">${i + 1}</td>${cols.map(([k]) => html`<td class="${r.problems[k] ? 'cell-bad' : ''}">${r[k] || (r.problems[k] ? '' : '—')}${r.problems[k] ? html`<div class="cell-why">${r.problems[k]}</div>` : ''}</td>`)}${extra ? html`<td class="cell-extra">${r.details.map((d) => html`<div><b>${d.label}</b> ${d.value}</div>`)}</td>` : ''}</tr>`)}</tbody>
-    </table></div>`;
 }
 
 // The submission desk: a conversation with the assistant on the left, the draft it fills on the right. The draft is the
@@ -817,18 +787,27 @@ const fieldBox = (path, label, kind) => html`<div class="as-f ${provClass(path)}
 
 const details = (row) => (row.details?.length ? html`<p class="srow-extra"><span class="micro">Extra detail</span> ${row.details.map((d, i) => html`${i ? ' · ' : ''}<b>${d.label}</b> ${d.value}`)}</p>` : '');
 
+// Column widths in the one-row table. The description takes what is left of the table's width, and never less than
+// DESC_MIN: a sheet with more columns than the log makes the table scroll sideways instead of squeezing it.
+const COL_W = { stage: 96, priority: 96, batch_no: 80, product_code: 90, tests_requested: 108, limits: 68 };
+const COL_W_EXTRA = 88;
+const DESC_MIN = 140;
+
 function samplesTable(d) {
-  return html`<div class="table-wrap as-tbl"><table class="table"><thead><tr><th>#</th>${fieldsOf(d.samples).map(([, l]) => html`<th>${l}</th>`)}<th><span class="sr-only">Remove</span></th></tr></thead>
+  const fields = fieldsOf(d.samples);
+  const widthOf = (k) => COL_W[k] ?? COL_W_EXTRA;
+  const minWidth = 28 + 34 + DESC_MIN + fields.filter(([k]) => k !== 'description').reduce((sum, [k]) => sum + widthOf(k), 0);
+  return html`<div class="table-wrap as-tbl"><table class="table" style="min-width:${minWidth}px"><thead><tr><th>#</th>${fields.map(([k, l]) => html`<th ${k === 'description' ? '' : raw(`style="width:${widthOf(k)}px"`)}>${l}</th>`)}<th><span class="sr-only">Remove</span></th></tr></thead>
     <tbody>${d.samples.map((row, i) => html`<tr>
       <td class="muted">${i + 1}</td>
-      ${fieldsOf(d.samples).map(([k, l, kind]) => {
+      ${fields.map(([k, l, kind]) => {
         const path = `samples.${i}.${k}`;
         const p = d.provenance[path];
         const problem = problemAt(path);
-        return html`<td class="as-f ${provClass(path)}" data-field="${path}" title="${problem?.message ?? (p ? `${SOURCES[p.source].tag}: ${p.reason || SOURCES[p.source].help}` : '')}">${control(path, kind, `${l}, sample ${i + 1}`)}${k === 'description' ? details(row) : ''}</td>`;
+        return html`<td class="as-f ${provClass(path)}" data-field="${path}" title="${problem?.message ?? (p ? `${SOURCES[p.source].tag}: ${p.reason || SOURCES[p.source].help}` : '')}">${control(path, kind, `${l}, sample ${i + 1}`)}</td>`;
       })}
       <td><button class="btn btn-quiet btn-sm" type="button" data-remove="${i}" aria-label="${`Remove sample ${i + 1}`}" ${desk.busy ? raw('disabled') : ''}>${ic('x', 15)}</button></td>
-    </tr>`)}</tbody></table></div>`;
+    </tr>${row.details?.length ? html`<tr class="as-xrow"><td colspan="${fields.length + 2}">${details(row)}</td></tr>` : ''}`)}</tbody></table></div>`;
 }
 
 function samplesCards(d) {
@@ -854,8 +833,7 @@ function formHtml() {
     <div class="card-head"><h2>Submission draft</h2><span class="micro faint">Edit anything</span></div>
     <div class="slip-sec"><h2><span class="step-n">01</span>Samples <span class="micro faint">${d.samples.length} of ${MAX_SAMPLES} max</span></h2>
       ${desk.table ? samplesTable(d) : samplesCards(d)}
-      <div class="row wrap" style="margin-top:10px"><button class="btn btn-sm" type="button" data-add ${d.samples.length >= MAX_SAMPLES || desk.busy ? raw('disabled') : ''}>${ic('plus', 15)} Add a sample</button>
-        <button class="linkish js-paste" type="button">Add from a spreadsheet</button></div></div>
+      <div class="row wrap" style="margin-top:10px"><button class="btn btn-sm" type="button" data-add ${d.samples.length >= MAX_SAMPLES || desk.busy ? raw('disabled') : ''}>${ic('plus', 15)} Add a sample</button></div></div>
     <div class="as-legend"><span class="micro">Key</span>${Object.entries(SOURCES).map(([k, s]) => html`<span class="ptag ${k}" title="${s.help}">${s.tag}</span>`)}<span class="ptag ask">needs you</span></div>
   </section>`;
 }
@@ -901,16 +879,6 @@ function chatHtml() {
     </form></section>`;
 }
 
-const pasteHtml = () => html`<section class="card as-paste paste" hidden aria-label="Add from a spreadsheet">
-  <div class="card-head"><h2>Add from a spreadsheet</h2><button class="btn btn-quiet btn-sm js-paste-close" type="button">Close</button></div>
-  <div class="card-pad">
-    <label class="field"><span class="label">Paste rows from Excel or Google Sheets</span><textarea class="textarea js-paste-text" rows="4" placeholder="Copy the rows, header row included, and paste them here"></textarea></label>
-    <div class="row wrap paste-file"><label class="btn btn-sm">${ic('upload', 15)} Upload .xlsx or .csv<input class="js-file" type="file" accept=".xlsx,.csv" hidden></label><span class="small muted js-file-name"></span></div>
-    <p class="slip-sub">We match your columns to ours and show what we found below; change any that are wrong. Columns we have no place for are kept as extra detail for the lab.</p>
-    <div class="js-sheet-pick"></div><div class="js-map"></div><div class="js-preview" role="status"></div><p class="help js-paste-note" role="status"></p>
-    <button class="btn btn-sm btn-primary js-paste-add" type="button" hidden></button>
-  </div></section>`;
-
 async function submitView() {
   const lk = await lookups();
   let assistant;
@@ -927,12 +895,11 @@ async function submitView() {
   if (!assistant.enabled) desk.tab = 'draft';
   return {
     title: 'Submit samples',
-    html: html`<div class="page-head"><div><div class="eyebrow">New shipment</div><h1>Tell us what is coming</h1>
-        <p class="sub">${assistant.enabled ? 'Paste the email, a packing list or a spreadsheet. The assistant fills in the submission as you talk. You review it and send it.' : 'Fill in what you are sending. Only the sample names are required.'} Nothing reaches the lab until you press Send to lab.</p></div></div>
+    html: html`<div class="page-head as-head"><div><div class="eyebrow">New shipment</div><h1>Tell us what is coming</h1></div></div>
       <div class="as-desk" data-tab="${desk.tab}">
         <div class="as-tabs" role="group" aria-label="View"><button type="button" data-tab="chat">Conversation</button><button type="button" data-tab="draft">Submission <span class="as-count js-count" hidden></span></button></div>
         <div class="as-chat-col js-chat"></div>
-        <div class="as-draft-col"><div class="js-form"></div>${pasteHtml()}<div class="js-sendbar"></div></div>
+        <div class="as-draft-col"><div class="js-form"></div><input class="js-file" type="file" accept=".xlsx,.csv" hidden aria-label="Spreadsheet to add"><div class="js-sendbar"></div></div>
       </div>`,
     mount: mountDesk,
   };
@@ -1190,79 +1157,30 @@ function mountDesk(root) {
     }
   });
 
-  // Spreadsheets are read here and on the server as before; their rows join the draft marked "from sheet".
-  const panel = $in('.as-paste');
-  const box = $('.js-paste-text', panel);
-  let sheet = null;
-  let book = [];
-  let fileName = 'pasted rows';
+  // An attached spreadsheet is read with its columns guessed, and its rows go straight into the draft marked "from sheet".
+  // Columns we have no place for stay on each sample as extra detail; whatever is wrong shows in the draft like any other value.
+  const fileInput = $in('.js-file');
   const blank = (r) => !ROW_FIELDS.some(([k]) => r[k]) && !r.details?.length;
-  const preview = () => {
-    if (sheet) {
-      sheet.rows = readSheet(sheet.grid, sheet.mapping).rows;
-    }
-    const rows = sheet?.rows ?? [];
-    const fit = MAX_SAMPLES - desk.draft.samples.filter((r) => !blank(r)).length;
-    $('.js-map', panel).innerHTML = sheet ? String(mapPanel(sheet.grid, sheet.mapping)) : '';
-    $('.js-preview', panel).innerHTML = sheet ? String(pastePreview(rows, sheet.mapping, { fit })) : '';
-    const add = $('.js-paste-add', panel);
-    const n = Math.min(rows.length, fit);
-    add.hidden = n === 0;
-    add.textContent = `Add ${plural(n, 'sample')}`;
-    $('.js-paste-note', panel).textContent = '';
-  };
-  const load = (grid) => {
-    sheet = grid.length ? { grid, mapping: guessMapping(grid, PORTAL_FIELDS) } : null;
-    preview();
-  };
-  const loadBook = (sheets, pick = 0) => {
-    book = sheets;
-    $('.js-sheet-pick', panel).innerHTML = sheets.length > 1 ? String(html`<label class="field"><span class="label">Sheet</span><select class="select js-sheet">${sheets.map((x, i) => html`<option value="${i}" ${i === pick ? raw('selected') : ''}>${x.name}</option>`)}</select></label>`) : '';
-    load(sheets[pick]?.rows ?? []);
-    if (sheets[pick]?.truncated) $('.js-paste-note', panel).textContent = 'This sheet is longer than we read in one go: only its first 400 rows and 40 columns are shown.';
-  };
   root.addEventListener('click', (e) => {
-    if (e.target.closest('.js-paste')) {
-      panel.hidden = false;
-      desk.tab = 'draft';
-      renderTabs();
-      panel.scrollIntoView({ block: 'nearest' });
-      box.focus();
-    }
-    if (e.target.closest('.js-paste-close')) panel.hidden = true;
+    if (e.target.closest('.js-paste')) fileInput.click();
   });
-  box.addEventListener('input', () => { book = []; fileName = 'pasted rows'; $('.js-sheet-pick', panel).innerHTML = ''; $('.js-file-name', panel).textContent = ''; load(gridFromText(box.value, 'paste')); });
-  $('.js-file', panel).addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    e.target.value = '';
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    fileInput.value = '';
     if (!file) return;
-    box.value = '';
-    fileName = file.name;
-    $('.js-file-name', panel).textContent = file.name;
+    if (desk.busy) return toast('The assistant is drafting. Attach the spreadsheet once it replies.');
+    let grid;
     try {
-      loadBook(await sheetsFromFile(file));
+      grid = (await sheetsFromFile(file)).find((x) => x.rows.length)?.rows;
     } catch (err) {
-      if (err.handled) return;
-      loadBook([]);
-      $('.js-paste-note', panel).textContent = err.message;
-    }
-  });
-  $('.js-sheet-pick', panel).addEventListener('change', (e) => loadBook(book, Number(e.target.value)));
-  $('.js-map', panel).addEventListener('change', (e) => {
-    if (e.target.matches('.js-use')) sheet.mapping = remap(sheet.mapping, Number(e.target.dataset.col), e.target.value);
-    if (e.target.matches('.js-header')) sheet.mapping = withHeader(sheet.grid, sheet.mapping, e.target.checked);
-    preview();
-  });
-  $('.js-paste-add', panel).addEventListener('click', () => {
-    if (desk.busy) {
-      $('.js-paste-note', panel).textContent = 'The assistant is drafting. Add these rows once it replies.';
+      if (!err.handled) toast(err.message);
       return;
     }
+    if (!grid) return toast('That file has no rows to add.');
+    const taken = readSheet(grid, guessMapping(grid, PORTAL_FIELDS)).rows;
     const d = desk.draft;
     const kept = d.samples.filter((r) => !blank(r));
-    const fit = MAX_SAMPLES - kept.length;
-    const { rows: taken, grid, mapping } = sheet;
-    const added = taken.slice(0, fit);
+    const added = taken.slice(0, MAX_SAMPLES - kept.length);
     const keptProvenance = Object.entries(d.provenance).filter(([path]) => {
       const m = /^samples\.(\d+)\./.exec(path);
       return !m || !blank(d.samples[+m[1]]);
@@ -1274,15 +1192,13 @@ function mountDesk(root) {
       if (r.details.length) mark(`samples.${kept.length + j}.details`, 'sheet');
     });
     const left = taken.length - added.length;
-    box.value = '';
-    sheet = left > 0 ? { grid: dropRows(grid, mapping, fit), mapping } : null;
-    preview();
-    $('.js-paste-note', panel).textContent = left > 0 ? `Only ${MAX_SAMPLES} samples fit in one submission. ${plural(left, 'row was', 'rows were')} not added.` : '';
-    panel.hidden = left <= 0;
+    toast(left > 0 ? `${plural(added.length, 'sample')} added. Only ${MAX_SAMPLES} fit in one submission, ${plural(left, 'row was', 'rows were')} not added.` : `${plural(added.length, 'sample')} added from ${file.name}`);
     if (desk.assistant.enabled) {
-      desk.messages.push({ role: 'note', text: `${plural(added.length, 'sample')} added from ${fileName}` });
+      desk.messages.push({ role: 'note', text: `${plural(added.length, 'sample')} added from ${file.name}` });
       renderChat();
     }
+    desk.tab = 'draft';
+    renderTabs();
     changed({ structure: true });
   });
 }
