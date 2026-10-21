@@ -7,7 +7,7 @@ import { state, can } from '../core/state.js';
 import { icon } from '../core/icons.js';
 import { navigate, refreshNav, setQuery } from '../core/nav.js';
 import {
-  pageHead, segmented, searchBox, priorityBadge, dueChip, fmtDateTime, plural, emptyState, badge, toast, showError, busy, confirmDialog, debounce,
+  pageHead, segmented, searchBox, priorityBadge, dueChip, fmtDateTime, plural, emptyState, badge, toast, showError, busy, confirmDialog, debounce, promptReason,
 } from '../core/ui.js';
 import { openReview } from './intake-review.js';
 
@@ -22,6 +22,8 @@ const TABS = [
 // disabled with `locks[key]` beside it otherwise. `bulk` is set for the ones that also apply to a selection.
 const ACTIONS = [
   { key: 'accept', label: 'Accept', icon: 'check', primary: true, bulk: { path: '/api/samples/accept', done: 'accepted' } },
+  // `ask` is the question put to the person before the decision is sent: the reason it is taken for.
+  { key: 'reject', label: 'Reject', icon: 'x', done: 'rejected', ask: 'Why is this sample being rejected? It and its open tests are cancelled, and the client is told the reason' },
 ];
 
 const FILTERS = ['client', 'project', 'priority', 'overdue'];
@@ -163,8 +165,11 @@ export async function render(ctx) {
     });
     host.querySelectorAll('[data-review]').forEach((b) => b.addEventListener('click', () => openReview(b.dataset.review, { title: `Review ${b.dataset.code}` })));
     host.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => busy(b, async () => {
-      await api.post(`/api/samples/${b.dataset.id}/${b.dataset.act}`);
-      toast(`${b.dataset.code} ${ACTIONS.find((a) => a.key === b.dataset.act).bulk?.done ?? 'updated'}`);
+      const a = ACTIONS.find((x) => x.key === b.dataset.act);
+      const reason = a.ask ? await promptReason(a.ask) : undefined;
+      if (a.ask && !reason) return;
+      await api.post(`/api/samples/${b.dataset.id}/${a.key}`, a.ask ? { reason } : undefined);
+      toast(`${b.dataset.code} ${a.done ?? a.bulk?.done ?? 'updated'}`);
       await after();
     })));
     host.querySelectorAll('[data-bulk]').forEach((b) => b.addEventListener('click', async () => {

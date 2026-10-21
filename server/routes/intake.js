@@ -8,20 +8,52 @@ import { testFeasibility } from '../intake-feasibility.js';
 import { HttpError, bad, guard, flags, locks, queued } from '../http.js';
 import { INTAKE_PENDING, INTAKE_HOLD, INTAKE_ACCEPTED } from '../lookups.js';
 import { idList, nowIso, today } from '../util.js';
-import { SAMPLE_QUEUES, SAMPLE_RULES } from '../workflow.js';
+import { SAMPLE_QUEUES, SAMPLE_RULES, cancelSampleAndTests } from '../workflow.js';
+import { postMessage } from './portal.js';
 
-/** Moves Sample `s` to intake state `intake` and records who decided it, when and why, in one transaction. */
-function decide(ctx, s, decision, { intake, summary, reason = null }) {
+/**
+ * Records who decided what on Sample `s`, when and why, in one transaction with moving it to intake state `intake`.
+ * A decision that settles the Sample some other way (reject cancels it) passes no `intake`.
+ */
+function decide(ctx, s, decision, { intake, summary, reason = null, also }) {
   tx(() => {
-    update(ctx, 'samples', s.id, { intake }, { action: 'STATUS', summary, reason });
+    if (intake) update(ctx, 'samples', s.id, { intake }, { action: 'STATUS', summary, reason });
+    also?.();
     insert(ctx, 'intake_decisions', { sample_id: s.id, decision, reason, decided_by: ctx.user.id, decided_at: nowIso() }, { code: s.code, summary });
   });
+}
+
+/**
+ * Tells the client about Sample `sample` in its Submission's portal thread, as a message from the lab person `ctx.user`.
+ * Posts nothing for a Sample that did not come in with a Submission. The intake permission is the gate, not `portal.respond`.
+ */
+export function tellClient(ctx, sample, body) {
+  const thread = get(`SELECT t.id FROM portal_threads t JOIN portal_submissions su ON su.id = t.submission_id, json_each(su.sample_ids) j
+    WHERE su.sample_ids IS NOT NULL AND j.value = ?`, sample.id);
+  if (thread) postMessage(thread.id, { user: ctx.user, body });
 }
 
 export function acceptSample(ctx, sampleId) {
   const s = mustGet('SELECT * FROM samples WHERE id = ?', sampleId, 'Sample');
   guard(SAMPLE_RULES.accept(s, ctx.user));
   decide(ctx, s, 'Accepted', { intake: INTAKE_ACCEPTED, summary: 'Sample accepted at intake review' });
+  return { ok: true };
+}
+
+/** Turns a Sample away: cancels it and its open Tests under the stricter `reject` rule, keeps the decision and tells the client why. */
+export function rejectSample(ctx, sampleId, body) {
+  const s = mustGet('SELECT * FROM samples WHERE id = ?', sampleId, 'Sample');
+  guard(SAMPLE_RULES.reject(s, ctx.user));
+  const reason = String(body.reason || '').trim();
+  if (!reason) throw bad('A reason is required to reject a sample', 'REASON_REQUIRED');
+  decide(ctx, s, 'Rejected', {
+    summary: 'Sample rejected at intake review',
+    reason,
+    also: () => {
+      cancelSampleAndTests(ctx, s, reason);
+      tellClient(ctx, s, `${s.code} has been rejected and will not be tested. Reason: ${reason}`);
+    },
+  });
   return { ok: true };
 }
 
@@ -48,7 +80,7 @@ export function acceptSamples(ctx, ids) {
 
 // The rules the screen offers on a Sample, each with its refusal message for the screen to show beside a disabled action.
 // A later ticket adds its rule's name here and its button to ACTIONS in public/js/views/intake.js.
-const SCREEN_ACTIONS = ['accept'];
+const SCREEN_ACTIONS = ['accept', 'reject'];
 
 // Each tab is a stage of intake: the Queue it reads and the intake state its Samples are at.
 const TABS = {
@@ -104,4 +136,5 @@ export default function routes(r) {
 
   r.post('/api/samples/accept', (ctx) => acceptSamples(ctx, idList(ctx.body.sample_ids)));
   r.post('/api/samples/:id/accept', (ctx) => acceptSample(ctx, +ctx.params.id));
+  r.post('/api/samples/:id/reject', (ctx) => rejectSample(ctx, +ctx.params.id, ctx.body));
 }
