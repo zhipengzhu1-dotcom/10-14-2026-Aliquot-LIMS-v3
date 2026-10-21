@@ -8,7 +8,7 @@ import { HttpError, bad, guard, flags, queued, workQueue } from '../http.js';
 import { assertCan } from '../auth.js';
 import { getNumber, labSettings } from '../settings.js';
 import {
-  SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, CUSTODY_ACTIONS, METHOD_USABLE, SAMPLE_OPEN, INTAKE_PENDING, priorityRank, rolesWith,
+  SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, CUSTODY_ACTIONS, METHOD_USABLE, SAMPLE_OPEN, INTAKE_PENDING, INTAKE_ACCEPTED, priorityRank, rolesWith,
 } from '../lookups.js';
 import { clean, cleanAll, nowIso, today, addBusinessDays, dateOf, idList, likeTerm, limitParam, round } from '../util.js';
 import {
@@ -321,7 +321,8 @@ export default function routes(r) {
     if (q.status) { const list = String(q.status).split(','); where.push(`t.status IN (${ph(list)})`); params.push(...list); }
     if (q.work) { const ids = workFilter(ctx, q.work, 'id'); where.push(`t.id IN (${ph(ids)})`); params.push(...ids); }
     if (q.analyst_id) { where.push('t.analyst_id = ?'); params.push(+q.analyst_id); }
-    if (q.unassigned) where.push('t.analyst_id IS NULL');
+    // Tests on a Sample still waiting for intake review cannot be assigned yet, so they are not unassigned work.
+    if (q.unassigned) { where.push('t.analyst_id IS NULL AND s.intake = ?'); params.push(INTAKE_ACCEPTED); }
     if (q.method_id) { where.push('t.method_id = ?'); params.push(+q.method_id); }
     if (q.sample_id) { where.push('t.sample_id = ?'); params.push(+q.sample_id); }
     if (q.instrument_id) { where.push('t.instrument_id = ?'); params.push(+q.instrument_id); }
