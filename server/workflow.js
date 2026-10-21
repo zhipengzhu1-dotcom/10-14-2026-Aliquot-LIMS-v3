@@ -246,6 +246,17 @@ export const SAMPLE_RULES = {
     if (!can(me, 'samples.review')) return forbidden();
     if (s.intake !== INTAKE_HOLD) return bad('This sample is not on hold');
   },
+
+  // Intake review: turning a Sample away cancels it, so it is stricter than `cancel`, never a way around it. It needs
+  // `samples.review` rather than `tests.cancel`, but only before any work has begun and while no Investigation is open.
+  reject(s, me) {
+    if (!can(me, 'samples.review')) return forbidden();
+    if (!SAMPLE_OPEN.includes(s.status)) return bad(`Sample is ${s.status.toLowerCase()} and can't be rejected`);
+    if (sampleTests(s.id).some((t) => !['Pending', 'Cancelled'].includes(t.status))) return bad('Testing has started on this sample — it can no longer be rejected');
+    if (s.intake === INTAKE_ACCEPTED) return bad('This sample has been accepted — it can no longer be rejected');
+    const inv = openSampleInvestigation(s.id) ?? openTests(s.id).map((t) => openTestInvestigation(t.id)).find(Boolean);
+    if (inv) return bad(`${inv.code} is open for this sample — close it before the sample can be rejected`);
+  },
 };
 
 export const SAMPLE_QUEUES = {
@@ -286,14 +297,22 @@ export function issueReport(ctx, sampleId, body) {
 export function cancelSample(ctx, sampleId, body) {
   const s = mustGet('SELECT * FROM samples WHERE id = ?', sampleId, 'Sample');
   guard(SAMPLE_RULES.cancel(s, ctx.user));
-  const reason = String(body.reason || '').trim();
+  cancelSampleAndTests(ctx, s, body.reason);
+  return { ok: true };
+}
+
+/**
+ * The cancellation itself, once the caller's own rule has allowed it: the Sample and every open Test, with `reason`,
+ * in one transaction. Rejecting at intake review reuses it under its own rule.
+ */
+export function cancelSampleAndTests(ctx, s, reason) {
+  reason = String(reason || '').trim();
   if (!reason) throw bad('A reason is required', 'REASON_REQUIRED');
   // The Sample is cancelled first so that cancelling its Tests doesn't re-derive its status on the way.
   tx(() => {
     update(ctx, 'samples', s.id, { status: 'Cancelled' }, { action: 'STATUS', summary: 'Sample cancelled', reason });
     for (const t of openTests(s.id)) changeStatus(ctx, t, { status: 'Cancelled' }, { summary: 'Test cancelled with sample', reason });
   });
-  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------------------------

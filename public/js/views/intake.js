@@ -8,7 +8,7 @@ import { icon } from '../core/icons.js';
 import { navigate, refreshNav, setQuery } from '../core/nav.js';
 import { askHoldReason } from './intake-hold.js';
 import {
-  pageHead, segmented, searchBox, priorityBadge, dueChip, fmtDateTime, plural, emptyState, badge, toast, showError, busy, confirmDialog, debounce,
+  pageHead, segmented, searchBox, priorityBadge, dueChip, fmtDateTime, plural, emptyState, badge, toast, showError, busy, confirmDialog, debounce, promptReason,
 } from '../core/ui.js';
 
 // The tabs, in order. Each is a stage of intake; the server returns the Samples of the tab asked for.
@@ -18,6 +18,12 @@ const TABS = [
   { key: 'ready', label: 'Ready to assign' },
 ];
 
+/** Asks why a Sample is rejected; resolves `{ reason }`, or null if dismissed. */
+const askRejectReason = async () => {
+  const reason = await promptReason('Why is this sample being rejected? It and its open tests are cancelled, and the client is told the reason');
+  return reason ? { reason } : null;
+};
+
 // The decisions the screen offers on one Sample. `key` is the rule's name: the button is enabled when `can[key]`, and
 // disabled with `locks[key]` beside it otherwise. `bulk` is set for the ones that also apply to a selection. `ask`, when
 // set, is shown before the action is posted: given `{ sample, submission }` it resolves the request body, or null to cancel.
@@ -26,6 +32,7 @@ const ACTIONS = [
   { key: 'accept', label: 'Accept', icon: 'check', primary: true, bulk: { path: '/api/samples/accept', done: 'accepted' } },
   { key: 'hold', label: 'Hold', icon: 'clock', ask: askHoldReason, done: 'put on hold', tabs: ['pending'] },
   { key: 'release', label: 'Release', icon: 'undo', done: 'released', tabs: ['hold'] },
+  { key: 'reject', label: 'Reject', icon: 'x', done: 'rejected', ask: askRejectReason },
 ];
 
 const FILTERS = ['client', 'project', 'priority', 'overdue'];

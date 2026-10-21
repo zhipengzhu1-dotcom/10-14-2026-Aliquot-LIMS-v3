@@ -321,6 +321,7 @@ const SAMPLE_ACTIONS = {
   accept: (c, s) => c.post(`/api/samples/${s}/accept`),
   hold: (c, s) => c.post(`/api/samples/${s}/hold`, { reason: 'Which batch is this?' }),
   release: (c, s) => c.post(`/api/samples/${s}/release`),
+  reject: (c, s) => c.post(`/api/samples/${s}/reject`, { reason: 'Vial arrived cracked' }),
   issue: (c, s) => c.post(`/api/samples/${s}/report`, { password: PASSWORD }),
   cancel: (c, s) => c.post(`/api/samples/${s}/cancel`, { reason: 'Client withdrew the batch' }),
   dispose: (c, s) => c.post(`/api/samples/${s}/custody`, { action: 'Disposed', note: 'Retention period over' }),
