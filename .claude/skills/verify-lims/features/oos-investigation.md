@@ -8,13 +8,13 @@ An out-of-specification result opens an investigation automatically when the ana
 - **Raise by hand:** `/investigations` → `button[data-act=new]` "Raise investigation" (needs `investigations.raise`: analyst, scientist, manager, QA). Form fields `select[name=type]` (default Deviation, or OOS when raised from a test), `select[name=severity]` (default Minor), `input[name=title]`, `textarea[name=description]`, `select[name=owner_id]` ("Lab manager decides" when empty), `input[name=due_date]` and `select[name=instrument_id]`. The test, sample and project links are hidden inputs prefilled by the page the form was opened from (`newInvestigation(prefill)` in `investigations.js`); from `/investigations` they are empty. Modal button "Raise".
 - **Record the investigation:** on `/investigations/:id`, the `form[data-inv]` has `textarea[name=root_cause]`, `textarea[name=impact]`, `textarea[name=capa]`, `select[name=conclusion]`, `select[name=status]` (stage, never Closed), `select[name=owner_id]`, `input[name=due_date]`, `select[name=severity]`, then `form[data-inv] button[type=submit]` "Save" (PUT `/api/investigations/:id`). Toast "Investigation saved". Anyone with raise or close rights may edit while it is open; a Closed investigation is locked (400 "Closed investigations are locked"). After closing, `form[data-inv]` stays in the page as a read-only container (no inputs, no Save), so its presence does not mean the investigation is editable.
 - **Close:** `[data-act=close]` "Close investigation" is shown from `can.close` (needs `investigations.close`: QA and manager; the person who performed the test under investigation is refused). The button first checks root cause and conclusion are filled, saves the form, then opens the e-sign modal (meaning `investigation.close.oos`, confirm "Sign & close", optional closure comment) and POSTs `/api/investigations/:id/close`. Toast "Investigation closed".
-- **From the test page:** `/tests/:id` has `[data-act=investigate]` "Raise investigation" inside the More actions dropdown (`button[data-dd][aria-label="More actions"]`, then `.dropdown-menu button[data-act=investigate]`), and its Investigations card has `[data-act=close-investigation]` "Close" for an open one. That close modal requires `textarea[name=root_cause]` and `textarea[name=conclusion]` (free text here, not the select of the investigation page; no separate comment field), which go in the close POST body.
+- **From the test page:** `/tests/:id` has `[data-act=investigate]` "Raise investigation" inside the More actions dropdown (`button[data-dd][aria-label="More actions"]`, then `.dropdown-menu button[data-act=investigate]`), and each investigation on the test has its own card, titled with its code and status ("OOS-2026-003 Under Investigation"), with `[data-act=close-investigation]` "Close" while it is open. That close modal requires `textarea[name=root_cause]` and `textarea[name=conclusion]` (free text here, not the select of the investigation page; no separate comment field), which go in the close POST body.
 - **Results table:** when linked to a test, the page shows that test's results with the failing row in `tr.row-fail`.
 
 ## How to get to it (user POV)
 
 - Sign in as `daniel.okafor` → **Investigations** in the sidebar (`/investigations`, filter chips by status; the sidebar badge counts open ones) → click the reference `a.code[href="/investigations/<id>"]`.
-- From the test page: the open investigation is linked in the Investigations card. The red notice "Investigation <code> is open — this result cannot be approved until it is closed." with its link shows only to the approver of a Reviewed test (`can.return` and not `can.accept`).
+- From the test page: the open investigation is linked in its own card's title. The red notice "Investigation <code> is open — this result cannot be approved until it is closed." with its link shows only to the approver of a Reviewed test (`can.return` and not `can.accept`).
 - From a sample page: the out-of-specification notice links each open investigation by its code ("Investigation OOS-… is open."), and the Investigations card lists it as `li.link[data-href="/investigations/<id>"]`.
 - Search with ⌘K for the OOS code.
 
@@ -27,7 +27,7 @@ Find an open OOS first. The demo seed ships at least one; otherwise submit a fai
 .claude/skills/verify-lims/scripts/api.mjs verify daniel.okafor GET /api/investigations/<id>     # investigation.{status,test_id,root_cause,conclusion}, can.{edit,close}
 ```
 
-On the 2026-10-14 seed this was id 5, `OOS-2026-003`, Under Investigation, on test 245.
+On the 2026-10-14 and 2026-10-18 seeds this was id 5, `OOS-2026-003`, Under Investigation, on test 245.
 
 Then, signed in as Daniel:
 

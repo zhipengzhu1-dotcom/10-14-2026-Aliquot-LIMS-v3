@@ -5,13 +5,13 @@ QA reads the append-only, hash-chained audit log, filters it by text, person, ac
 ## Sub-features
 
 - **Filter:** `input[name=q]` (matches record code, summary, changes, reason, username and full name), `select[name=user]`, `select[name=action]` (CREATE, UPDATE, STATUS, SIGN, CUSTODY, LOGIN, LOGIN_FAILED, SIGNATURE_FAILED, PRINT, VERIFY; the server also writes actions not listed, such as VIEW), `select[name=entity]` (record type), date `from`/`to`; `a.btn.ghost[href="/audit"]` "Reset". The table shows who, when, action, record, summary and old → new values with the reason. When is the browser's local time (`fmtDateTime`), not UTC; only the CSV's `timestamp_utc` and the API's `at` are UTC. A record links to its page only for the entity types in `ROUTE` in `audit.js` (samples, tests, methods, instruments, inventory, notebook entries, investigations, projects, clients, invoices, users); other rows show the code unlinked.
-- **Verify integrity:** `button[data-act=verify]` "Verify integrity" calls `GET /api/audit/verify` and renders into `[data-verify]` either `.notice.ok` "Integrity verified. All N audit entries are intact and in sequence" or `.notice.bad` "Integrity check failed at entry #…". The verify call itself writes an audit row, after counting, so the notice's N leaves that row out. The table does not reload, so the new row shows only after Apply or a reload.
+- **Verify integrity:** `button[data-act=verify]` "Verify integrity" calls `GET /api/audit/verify` and renders into `[data-verify]` either `.notice.ok` "Integrity verified. All N audit entries are intact and in sequence" or `.notice.bad` "Integrity check failed at entry #…". N is formatted for the browser's locale ("All 3,893 audit entries…" in en-US on 2026-10-18; the CSV export toast and the table foot too), so strip the separators before comparing with the API's `count`. The verify call itself writes an audit row, after counting, so the notice's N leaves that row out. The table does not reload, so the new row shows only after Apply or a reload.
 - **Export CSV:** `button[data-act=csv]` builds a CSV of the loaded rows client-side and triggers a download named `aliquot-audit-<date>.csv`; toast "Exported N entries".
 
 ## How to get to it (user POV)
 
 - Sign in as `daniel.okafor` (or `priya.raman`, `admin`) → **Audit trail** in the sidebar (`/audit`).
-- Record pages have no link into `/audit`. Each shows its own History panel inline (from `GET /api/history/:entity/:id`), visible to every role that can see the record. To see one record in the trail, filter `/audit` by its code.
+- Record pages have no link into `/audit`. Each has a History tab beside Files in its record footer (`.record-footer button[data-ft=history]`, loaded from `GET /api/history/:entity/:id` on the first click), visible to every role that can see the record; the team page has none. To see one record in the trail, filter `/audit` by its code.
 - Analysts and business users do not see the item; `GET /api/audit` as them is 403.
 
 ## Driving it with agent-browser

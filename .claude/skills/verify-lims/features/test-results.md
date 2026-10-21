@@ -9,7 +9,7 @@ An analyst opens a test assigned to them, types results (checked live against sp
 - Instrument (`select[name=instrument_id]`), required unless the technique is Physical / Visual or Gravimetric. Instruments out of calibration, Out of Service or in Maintenance are disabled, and Retired ones are not listed. The exception is the instrument already recorded on the test, which stays listed and selectable whatever its state. In the demo seed, instrument 3 (HPLC-03) is disabled because its calibration is overdue (`cal_state: "overdue"`), even though `GET /api/instruments/3` reports `status: "Available"`.
 - Standards, reagents and columns (`input[name=material_ids]`), raw data reference (`input[name=raw_data_ref]`), comments (`textarea[name=comments]`).
 - Save (`button[data-save]`, PUT `/api/tests/:id`, moves Pending to In Progress).
-- Save & submit (e-sign "Performed", POST `/api/tests/:id/submit`). It saves first, then refuses if any result is still Pending, so a refused submit has already written the save's audit row (and moved a Pending test to In Progress). A failing result opens an OOS investigation automatically, unless the test already has an open one.
+- Save & submit (e-sign "Performed", POST `/api/tests/:id/submit`). In the browser it first refuses, without saving, when the technique needs an instrument and none is chosen (toast "Choose the instrument you used before submitting"; nothing is saved and no audit row is written, proven live 2026-10-18 on an In Progress test). Then it saves, then refuses if any result is still Pending, so that refusal has already written the save's audit row (and moved a Pending test to In Progress). A direct POST `/submit` words its own refusals: "Complete every result before submitting: …" and "Record the instrument used before submitting". A failing result opens an OOS investigation automatically, unless the test already has an open one.
 - Changing a recorded result asks for a reason: modal `textarea[name=reason]`, then "Continue".
 - Files (`TEST_RULES.attach`): only the assigned analyst, or someone who assigns tests, may attach, and only while the test is Pending or In Progress, so a returned test accepts files again. Once it is Submitted, Reviewed, Approved or Cancelled the Files panel shows "The test is <status> — attachments are locked" ("The test is submitted — …" after submitting) instead of the drop zone. Anyone else sees "Only the assigned analyst can attach files to this test".
 
@@ -39,6 +39,7 @@ agent-browser click 'label:has(input[name="o-518"][value=Pass])'      # text res
 agent-browser select 'select[name=instrument_id]' 10
 agent-browser click '.btn-group button[data-act=submit]'               # "Save & submit for review"
 agent-browser wait '.modal input[name=password]'
+agent-browser wait --fn 'document.getAnimations().every(a=>a.playState!=="running")'
 agent-browser fill '.modal input[name=password]' demo1234
 agent-browser click '.modal-foot button[data-submit]'                  # "Sign & submit"
 agent-browser wait 1500

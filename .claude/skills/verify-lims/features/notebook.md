@@ -24,13 +24,17 @@ Electronic lab notebook entries (`ELN-YYYY-NNNN`). The author writes with autosa
 ```bash
 agent-browser open "$B/notebook"
 agent-browser click 'button[data-act=new]'
+agent-browser wait '.modal input[name=title]'                  # the modal opens only after projects and methods load; this wait is the one that matters
+agent-browser wait --fn 'document.getAnimations().every(a=>a.playState!=="running")'
 agent-browser fill '.modal input[name=title]' 'Verification entry'
 agent-browser click '.modal-foot button[data-submit]'           # "Create entry" → /notebook/<id>
 agent-browser wait 'textarea[data-body]'
+agent-browser wait --fn '!document.querySelector(".modal-backdrop")'
 agent-browser fill 'textarea[data-body]' 'Weighed 10.02 mg of RS lot 2291.'
 agent-browser wait --fn 'document.querySelector("span[data-save-state]").textContent.startsWith("Saved")'
 agent-browser click 'button[data-act=sign]'
 agent-browser wait '.modal input[name=password]'
+agent-browser wait --fn 'document.getAnimations().every(a=>a.playState!=="running")'
 agent-browser fill '.modal input[name=password]' demo1234
 agent-browser click '.modal-foot button[data-submit]'           # "Sign & lock"
 ```
@@ -52,6 +56,6 @@ End state that proves it:
 - **Behavior** (`notebook.js` `beforeunload` guard). Wait for `span[data-save-state]` to read "Saved…" before navigating or reloading. Unsaved drafts have a `beforeunload` guard, which raises a native dialog that blocks automation.
 - **Behavior** (`notebook.js`). `[data-act=print]` calls `window.print()`, a native print dialog. Don't click it.
 - **Behavior** (`openForm` and `esign` in `public/js/core/ui.js`). The modal submit button is `.modal-foot button[data-submit]`. Its text differs per modal ("Create entry", "Sign & lock", "Sign as witness").
-- **Hypothesis** (cause not proven; the opening animation of SKILL.md's "Let modals finish opening" fits). A "Create entry" click chained straight after filling the title can report `✓ Done` without creating the entry: the modal closes and the URL stays `/notebook`. Check that the URL became `/notebook/<id>` before going on; if not, open the modal and try again.
+- **Harness quirk** (`newEntry` in `public/js/views/notebook.js` fetches projects and methods before it opens the modal; proven live 2026-10-18 and again in review). Without a wait for `.modal input[name=title]`, "New entry" failed 2 of 2 times: `fill` ran before the modal existed ("Element not found"), and the next "Create entry" click still reported `✓ Done` with the URL left on `/notebook`. Waiting for the input created the entry every time (5 of 5 across two runs). The animation wait is kept for SKILL.md's rule but does little under reduced motion (`app.css` cuts animations to 0.01 ms). Check that the URL became `/notebook/<id>` before going on.
 - **Harness quirk** (proven live 2026-10-18). The first click on the new entry's page, right after the create modal closed, landed on the closing `.modal-backdrop.out` even after animations had settled (it is removed on a 150 ms timer, `ui.js`; see SKILL.md). Wait for `!document.querySelector(".modal-backdrop")` first.
 - **Behavior** (`notebook.js`). Autosave can also show "Not saved" when a save fails.
