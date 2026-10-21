@@ -28,15 +28,35 @@ The registration comes from `gh api` at each pass of the loop and passes to the 
 
 A job runs the pull request's code on the Mac. Its container cannot see another job's container, but it can reach services on the Mac through `host.docker.internal`, such as the public demo on port 3003. That exposure is accepted because the repo is private and every pull request comes from the owner or the owner's agents.
 
+## The runner worktree
+
+The runners run from their own worktree of this repo's `main`, at `~/Desktop/Claude/10. October 2026/aliquot-ci-runner`. Never run them from the live copy (see *The public demo* in `README.md`). It serves the public demo and is not a checkout of this repo, so its script registers runners on a retired repo, and this repo's jobs wait in the queue.
+
+Make the worktree once, from any clone of this repo:
+
+```sh
+git fetch origin
+git worktree add --detach ~/Desktop/Claude/10.\ October\ 2026/aliquot-ci-runner origin/main
+```
+
+To update it, stop the runners, move the worktree to the latest `main`, and start them again:
+
+```sh
+cd ~/Desktop/Claude/10.\ October\ 2026/aliquot-ci-runner
+scripts/animated-runner.sh stop
+git fetch && git checkout --detach origin/main
+scripts/animated-runner.sh start
+```
+
 ## Start the runners
 
-Run this from the live copy (see *The public demo* in `README.md`), which stays on `main`:
+Run this in the runner worktree:
 
 ```sh
 scripts/animated-runner.sh start
 ```
 
-Each slot registers its runner and starts its container. The slots keep running after you close the terminal. They stop when the Mac restarts, so run `start` again after a restart. `start` refuses while the slots are still running, because a second loop would remove the first loop's container mid-job. While Docker Desktop is stopped, each slot waits and registers no runner.
+Each slot registers its runner and starts its container. `start` then waits up to 90 seconds for a runner to come online on the repo. If none does, it exits 1 and points at the slot logs and Docker Desktop. The slots keep trying after that, so a slow first image pull can still bring a runner online. The slots keep running after you close the terminal. They stop when the Mac restarts, so run `start` again after a restart. `start` refuses while the slots are still running, because a second loop would remove the first loop's container mid-job. The refusal names the script the slots run and the repo it serves, with the `stop` command to run. While Docker Desktop is stopped, each slot waits and registers no runner.
 
 Each slot runs under `caffeinate -i`, which holds off idle sleep while the slots run, on battery as well as on power. A sleeping Mac freezes the Docker VM and the runner inside it, and GitHub fails the job 10 minutes after the runner's last heartbeat. A closed lid, Sleep in the Apple menu and a flat battery still sleep the Mac, so run `stop` before any of them. `stop` also releases the hold.
 
@@ -46,7 +66,12 @@ Each slot runs under `caffeinate -i`, which holds off idle sleep while the slots
 scripts/animated-runner.sh status
 ```
 
-It prints one line for each runner registered to the repo, with its name, `online` or `offline`, and whether it is running a job. Then it says whether the slots keep the Mac awake. It exits 1 when no slot runs under `caffeinate`, for example when the slots are stopped. Each slot's log is in `~/Library/Logs/animated-runner/<slot>.log`, and `docker ps --filter name=animated-runner-` shows the containers.
+It prints one line for each runner registered to the repo, with its name, `online` or `offline`, and whether it is running a job. Then it says whether the slots keep the Mac awake. It exits 1 when no slot runs under `caffeinate`, for example when the slots are stopped. It also exits 1 in two other cases:
+
+- A slot runs a script that serves another repo, such as the live copy's. The message names that script and its repo, with the `stop` command to run. Then run `start` in the runner worktree.
+- The slots run but no `animated-runner-*` runner is online on the repo. Each runner deregisters after its job and the next pass registers a new one, so `status` checks again for up to 30 seconds before it fails.
+
+Each slot's log is in `~/Library/Logs/animated-runner/<slot>.log`, and `docker ps --filter name=animated-runner-` shows the containers.
 
 ## Stop the runners
 
@@ -72,12 +97,7 @@ GitHub refuses a runner that is too far behind its latest release, so update the
    docker run --rm ghcr.io/actions/actions-runner@<digest> ./config.sh --version | grep -x '[0-9.]*'
    ```
 
-2. Push the change to `main`, pull it into the live copy, then restart the runners. Each slot pulls the new image on its first pass.
-
-   ```sh
-   scripts/animated-runner.sh stop
-   scripts/animated-runner.sh start
-   ```
+2. Push the change to `main`, then update the runner worktree as *The runner worktree* says. Each slot pulls the new image on its first pass.
 
 ## Beside other projects' runners
 
