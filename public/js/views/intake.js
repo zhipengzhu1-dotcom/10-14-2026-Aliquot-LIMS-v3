@@ -6,7 +6,6 @@ import { api } from '../core/api.js';
 import { state, can } from '../core/state.js';
 import { icon } from '../core/icons.js';
 import { navigate, refreshNav, setQuery } from '../core/nav.js';
-import { openReview } from './intake-review.js';
 import {
   pageHead, segmented, searchBox, priorityBadge, dueChip, fmtDateTime, plural, emptyState, badge, toast, showError, busy, confirmDialog, debounce, promptReason,
 } from '../core/ui.js';
