@@ -9,6 +9,7 @@ import { HttpError, bad, guard, flags, locks, queued } from '../http.js';
 import { INTAKE_PENDING, INTAKE_HOLD, INTAKE_ACCEPTED } from '../lookups.js';
 import { idList, nowIso, today } from '../util.js';
 import { SAMPLE_QUEUES, SAMPLE_RULES, cancelSampleAndTests } from '../workflow.js';
+import { reviewValues } from '../intake-values.js';
 import { postMessage } from './portal.js';
 
 /**
@@ -147,11 +148,12 @@ export default function routes(r) {
     return { tab, counts: Object.fromEntries(Object.keys(TABS).map((name) => [name, rows[name].length])), groups: [...groups.values()] };
   });
 
-  // What the review pane shows for one Sample. `tests`: each open Test with its Method and the feasibility indicators.
+  // What the review pane shows for one Sample, one key per section, each computed in its own module: `tests` (the
+  // feasibility indicators of each open Test) and the values keys of `reviewValues`.
   r.get('/api/intake/samples/:id/review', (ctx) => {
     assertCan(ctx, 'samples.review');
     const s = mustGet('SELECT * FROM samples WHERE id = ?', +ctx.params.id, 'Sample');
-    return { tests: testFeasibility(s) };
+    return { ...reviewValues(s, ctx.user), tests: testFeasibility(s) };
   });
 
   r.post('/api/samples/accept', (ctx) => acceptSamples(ctx, idList(ctx.body.sample_ids)));

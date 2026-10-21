@@ -177,7 +177,7 @@ export async function render(ctx) {
       sync();
     });
     const outcomesHost = () => ctx.el.querySelector('[data-outcomes-host]');
-    host.querySelectorAll('[data-review]').forEach((b) => b.addEventListener('click', () => openReview(b.dataset.review, { title: `Review ${b.dataset.code}` })));
+    host.querySelectorAll('[data-review]').forEach((b) => b.addEventListener('click', () => openReview(Number(b.dataset.review), { onChange: () => load() })));
     host.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', async () => {
       const a = ACTIONS.find((x) => x.key === b.dataset.act);
       if (a.run) return a.run({ ids: [Number(b.dataset.id)], outcomes: outcomesHost(), after });
