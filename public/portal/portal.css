@@ -256,8 +256,8 @@ button.avatar:hover, button.avatar[aria-expanded="true"] { background: var(--lim
   .tabbar { display: none !important; }
 }
 
-.main { max-width: 1180px; min-width: 0; overflow-wrap: anywhere; margin: 0 auto; padding: 22px var(--gutter) calc(var(--tabbar) + 32px + env(safe-area-inset-bottom)); }
-@media (min-width: 900px) { .main { padding: 32px 32px 72px; } :root { --gutter: 32px; } .top-in { padding: 0 32px; } }
+.main { max-width: 1180px; min-width: 0; overflow-wrap: anywhere; margin: 0 auto; padding: 16px var(--gutter) calc(var(--tabbar) + 32px + env(safe-area-inset-bottom)); }
+@media (min-width: 900px) { .main { padding: 18px 32px 72px; } :root { --gutter: 32px; } .top-in { padding: 0 32px; } }
 
 /* The page assembles itself top-down. */
 /* Staggers are a geometric series with ratio 1/φ (62, 38, 24, 15… ms): the cascade decelerates like a settling ball and,
@@ -447,30 +447,6 @@ form.card { counter-reset: step; }
 @media (min-width: 720px) { .srow-more { grid-template-columns: repeat(4, 1fr); } }
 .srow-more .input, .srow-more .select { min-height: 40px; font-size: 14px; }
 .srow .linkish { margin-left: 32px; }
-.paste { margin-top: 12px; }
-.paste .btn { margin-top: 8px; }
-.paste .help { margin: 8px 0 0; font-size: 13.5px; color: var(--bad); }
-.paste .help:empty { display: none; }
-.paste .alert { margin: 8px 0; }
-.paste-sum { margin: 12px 0 8px; font-size: 14px; }
-.bad-text { color: var(--bad); font-weight: 600; }
-.paste-table { max-height: 360px; overflow: auto; border: 1px solid var(--line); }
-.paste-table .table { font-size: 13px; }
-.paste-table .table th, .paste-table .table td { padding: 8px 10px; vertical-align: top; }
-.paste-table td:not(.cell-bad) { white-space: nowrap; }
-.paste-table td.cell-bad { background: var(--bad-soft); box-shadow: inset 2px 0 0 var(--bad); }
-.cell-why { margin-top: 2px; font-size: 12px; color: var(--bad); min-width: 160px; }
-.paste-table td.cell-extra { white-space: normal; min-width: 160px; color: var(--ink-2); }
-.paste-file { align-items: center; gap: 10px; }
-.paste-file .btn { cursor: pointer; }
-.map { margin: 12px 0 0; }
-.map-header { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 8px; }
-.map-cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
-.map-col { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--line); background: var(--surface-2); min-width: 0; }
-.map-col.is-ignored { opacity: .6; }
-.map-head { font-weight: 600; font-size: 13.5px; overflow-wrap: anywhere; }
-.map-eg { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.map-col .select { min-height: 36px; font-size: 13.5px; }
 .srow-extra { margin: 8px 0 0 32px; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
 .srow-extra .micro { margin-right: 6px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -622,7 +598,7 @@ form.card { counter-reset: step; }
 /* Submission desk (#/submit): the conversation beside the draft it fills. Provenance shows on every value; a guess is
    dashed amber, a fix is blue, what still needs the client is orange, and taken-as-given values stay plain. */
 .as-desk { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
-@media (min-width: 900px) { .as-desk { grid-template-columns: minmax(360px, 9fr) 11fr; } .as-tabs { display: none; } }
+@media (min-width: 900px) { .as-desk { grid-template-columns: minmax(300px, 1fr) minmax(0, 2.4fr); } .as-tabs { display: none; } }
 @media (max-width: 899px) {
   .as-tabs { display: flex; gap: 2px; padding: 2px; background: var(--surface-3); position: sticky; top: 61px; z-index: 6; }
   .as-tabs button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; border: 0; border-radius: 1px; background: none; color: var(--ink-2); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
@@ -688,18 +664,24 @@ form.card { counter-reset: step; }
 .as-sample .srow-extra { padding: 0 12px 10px; }
 /* Positioned, so the visually hidden header label scrolls inside the box instead of widening the page. */
 .as-tbl { position: relative; }
-.as-tbl .table { font-size: 13px; }
-.as-tbl .table th, .as-tbl .table td { padding: 6px; vertical-align: top; }
+/* One compact row per sample, every column of the log in view. The description takes what the fixed columns leave. */
+.as-tbl .table { font-size: 12.5px; table-layout: fixed; }
+.as-tbl .table th { padding: 7px 6px; font-size: 9px; letter-spacing: .07em; overflow: hidden; text-overflow: ellipsis; }
+.as-tbl .table td { padding: 4px 6px; vertical-align: top; }
+.as-tbl .table tbody tr:hover td:first-child { box-shadow: none; }
 .as-tbl td.as-f { display: table-cell; }
-.as-tbl .input, .as-tbl .select { min-height: 36px; padding: 6px 8px; font-size: 13px; min-width: 110px; }
-.as-tbl .select { padding-right: 28px; background-position: right 8px center; }
-.as-tbl td[data-field$=".description"] .input { min-width: 170px; }
+.as-tbl .input, .as-tbl .select { min-height: 32px; padding: 4px 6px; font-size: 12.5px; min-width: 0; }
+.as-tbl .select { padding-right: 22px; background-position: right 6px center; background-size: 10px; text-overflow: ellipsis; }
+.as-tbl .table :is(th, td):last-child { width: 34px; padding-left: 0; padding-right: 4px; }
+.as-tbl td:last-child .btn { width: 28px; min-width: 0; min-height: 32px; padding: 0; }
 .as-tbl .table :is(th, td):nth-child(-n+2) { position: sticky; z-index: 1; background: var(--surface); }
 .as-tbl .table th:nth-child(-n+2) { z-index: 2; background: var(--surface-2); }
-.as-tbl .table :is(th, td):first-child { left: 0; width: 34px; min-width: 34px; max-width: 34px; padding-left: 8px; }
-.as-tbl .table :is(th, td):nth-child(2) { left: 34px; box-shadow: 1px 0 0 var(--line-strong); }
+.as-tbl .table .as-xrow td:is(:first-child, :last-child) { position: static; width: auto; max-width: none; min-width: 0; padding: 0 8px 6px 36px; border-top: 0; box-shadow: none; background: none; }
+.as-tbl .as-xrow .srow-extra { margin: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.as-tbl tr:has(+ .as-xrow) td { border-bottom: 0; }
+.as-tbl .table :is(th, td):first-child { left: 0; width: 28px; min-width: 28px; max-width: 28px; padding-left: 8px; padding-right: 0; }
+.as-tbl .table :is(th, td):nth-child(2) { left: 28px; box-shadow: 1px 0 0 var(--line-strong); }
 .as-tbl .table tbody tr:hover td:nth-child(-n+2) { background: var(--surface-2); }
-.as-paste[hidden] { display: none; }
 .as-send { flex-wrap: wrap; }
 .as-send .count { min-width: 0; }
 .as-hint { display: block; margin-top: 2px; font-size: 12.5px; color: var(--muted); }
@@ -719,3 +701,17 @@ form.card { counter-reset: step; }
   .sheet::before { display: none; }
   .view > * { animation: none; }
 }
+
+/* Submit page: keep the draft compact. The top padding lives on .main so it never changes when the page renders. */
+.as-head { margin-bottom: 12px; gap: 4px 16px; }
+.as-head .eyebrow { margin-bottom: 4px; }
+.as-head h1 { font-size: 22px; }
+.as-form .card-head { min-height: 42px; padding: 6px 16px; }
+.as-form .slip-sec { padding: 12px 16px; }
+.as-form .slip-sec h2 { margin-bottom: 8px; }
+.as-form .as-legend { padding: 8px 16px; }
+.as-send { padding: 10px 16px; }
+.as-chat-head { min-height: 42px; padding: 6px 16px; }
+.as-composer { padding: 10px 12px 12px; }
+.as-composer .textarea { min-height: 84px; }
+.as-thread { min-height: 200px; }

@@ -182,6 +182,12 @@ test('a returned test counts against its analyst', async () => {
 });
 
 test('the administrator oversees every work queue but cannot act on it', async () => {
+  await setupLab();
+  // The demo lab is seeded from the clock, and just after its morning review wave no Test waits for review, so stage one at each point.
+  await submit(await receive());
+  const toApprove = await receive();
+  await submit(toApprove);
+  await (await as('sarah.lindqvist')).ok('POST', `/api/tests/${toApprove}/review`, { decision: 'approve', password: PASSWORD });
   const admin = await as('admin');
   assert.equal((await admin.get('/api/workload')).status, 200, 'workload');
   assert.ok((await admin.ok('GET', '/api/auth/me')).permissions.includes('work.oversee'));
@@ -191,7 +197,7 @@ test('the administrator oversees every work queue but cannot act on it', async (
   assert.equal((await lab.priya.get('/api/reviews?scope=lab')).status, 403, 'the lab-wide view is for overseers');
   const submitted = await admin.ok('GET', '/api/tests?status=Submitted');
   const reviewed = await admin.ok('GET', '/api/tests?status=Reviewed');
-  assert.ok(submitted.length && reviewed.length, 'the demo lab has tests waiting at both stages');
+  assert.ok(submitted.length && reviewed.length, 'tests are waiting at both stages');
   assert.deepEqual(reviews.toReview.map((t) => t.id).sort(), submitted.map((t) => t.id).sort(), 'every test waiting for peer review');
   assert.deepEqual(reviews.toApprove.map((t) => t.id).sort(), reviewed.map((t) => t.id).sort(), 'every test waiting for approval');
   // The administrator may still edit or dispose of a Sample: oversight withholds only the action each list is for.
