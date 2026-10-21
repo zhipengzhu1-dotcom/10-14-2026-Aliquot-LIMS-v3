@@ -28,7 +28,7 @@ const uses = (mapping) => mapping.columns.map((c) => c.use);
 test('an Excel copy with the client’s seven headings', () => {
   assert.deepEqual(read(EXCEL), {
     mapping: {
-      header: true,
+      header: true, skip: 0,
       columns: [
         { label: 'Product Code', use: 'product_code' }, { label: 'Product Name', use: 'description' }, { label: 'Lot#', use: 'batch_no' },
         { label: 'Status', use: 'stage' }, { label: 'Urgency', use: 'priority' }, { label: 'Test requested', use: 'tests_requested' }, { label: 'Quantity', use: 'quantity' },
@@ -52,7 +52,7 @@ test('an Excel copy with the client’s seven headings', () => {
 
 test('headings in any order, some missing, an unknown one kept as extra detail', () => {
   assert.deepEqual(read('Qty\tBatch\tName\tStorage\nx3\tL1\tAspirin\t2-8 °C\nx4\tL2\tParacetamol\t\n'), {
-    mapping: { header: true, columns: [{ label: 'Qty', use: 'quantity' }, { label: 'Batch', use: 'batch_no' }, { label: 'Name', use: 'description' }, { label: 'Storage', use: 'extra' }] },
+    mapping: { header: true, skip: 0, columns: [{ label: 'Qty', use: 'quantity' }, { label: 'Batch', use: 'batch_no' }, { label: 'Name', use: 'description' }, { label: 'Storage', use: 'extra' }] },
     rows: [
       { problems: {}, quantity: 'x3', batch_no: 'L1', description: 'Aspirin', details: [{ label: 'Storage', value: '2-8 °C' }] },
       { problems: {}, quantity: 'x4', batch_no: 'L2', description: 'Paracetamol', details: [] },
@@ -65,7 +65,7 @@ test('a client’s own sheet where most headings are theirs, not ours, is still 
     'Product Code\tPRODUCT NAME\tTYPE\tLOT#\tCLIENT\tEXP DATE\tTESTING\tPO NUMBER',
     '0836J\tDiphenhydramine 50mg Capsule\tInitial\tR635939\tCPC\t2027-01\tTBD\tPO-77',
   ].join('\n'));
-  assert.deepEqual(mapping, { header: true, columns: [
+  assert.deepEqual(mapping, { header: true, skip: 0, columns: [
     { label: 'Product Code', use: 'product_code' }, { label: 'PRODUCT NAME', use: 'description' }, { label: 'TYPE', use: 'extra' }, { label: 'LOT#', use: 'batch_no' },
     { label: 'CLIENT', use: 'extra' }, { label: 'EXP DATE', use: 'extra' }, { label: 'TESTING', use: 'extra' }, { label: 'PO NUMBER', use: 'extra' },
   ] });
@@ -86,7 +86,7 @@ test('a heading repeated, a blank heading and an empty column', () => {
 test('no heading row: the client’s column order, a missing name flagged, columns past it kept as detail', () => {
   assert.deepEqual(read('MF500\tMetformin\tMF-1\tBulk-Hold\t3d\tWater\t10\r\nMF500\t\tMF-2\tinitial\tTODAY\t\t5'), {
     mapping: {
-      header: false,
+      header: false, skip: 0,
       columns: [
         { label: 'Column A', use: 'product_code' }, { label: 'Column B', use: 'description' }, { label: 'Column C', use: 'batch_no' }, { label: 'Column D', use: 'stage' },
         { label: 'Column E', use: 'priority' }, { label: 'Column F', use: 'tests_requested' }, { label: 'Column G', use: 'quantity' },
@@ -104,16 +104,66 @@ test('no heading row: the client’s column order, a missing name flagged, colum
 test('one name per line still works, and a first line that looks like a heading is a sample (#17)', () => {
   assert.deepEqual(read('Atorvastatin API, lot 2026-118\n\nAtorvastatin API, lot 2026-119\n').rows.map((r) => r.description), ['Atorvastatin API, lot 2026-118', 'Atorvastatin API, lot 2026-119']);
   assert.deepEqual(read('Sample\nAspirin'), {
-    mapping: { header: false, columns: [{ label: 'Column A', use: 'description' }] },
+    mapping: { header: false, skip: 0, columns: [{ label: 'Column A', use: 'description' }] },
     rows: [{ problems: {}, details: [], description: 'Sample' }, { problems: {}, details: [], description: 'Aspirin' }],
   });
   assert.deepEqual(read('Code\nX1').rows.map((r) => [r.description, r.problems]), [['Code', {}], ['X1', {}]]);
 });
 
+test('a title row above the headings is skipped: neither a sample nor detail', () => {
+  const { mapping, rows } = read('ACME Labs sample submission form\nName\tLot\tQty\tShelf\nAspirin\tL1\tx3\tA2\nParacetamol\tL2\tx4\t', LAB_FIELDS);
+  assert.deepEqual(mapping, { header: true, skip: 1, columns: [
+    { label: 'Name', use: 'description' }, { label: 'Lot', use: 'batch_no' }, { label: 'Qty', use: 'quantity' }, { label: 'Shelf', use: 'extra' },
+  ] });
+  assert.deepEqual(rows, [
+    { problems: {}, description: 'Aspirin', batch_no: 'L1', quantity: 'x3', details: [{ label: 'Shelf', value: 'A2' }] },
+    { problems: {}, description: 'Paracetamol', batch_no: 'L2', quantity: 'x4', details: [] },
+  ]);
+});
+
+test('the heading row is searched for in the first 5 rows, not the 6th', () => {
+  const above = ['Sample submission form', 'Client\tACME', 'Date\t2026-10-21', 'PO\t4471', 'Contact\tJ. Doe'];
+  for (let position = 1; position <= 6; position++) {
+    const text = [...above.slice(0, position - 1), 'Name\tLot\tQty', 'Aspirin\tL1\tx3'].join('\n');
+    const { mapping, rows } = read(text);
+    if (position <= 5) {
+      assert.deepEqual([mapping.header, mapping.skip, uses(mapping)], [true, position - 1, ['description', 'batch_no', 'quantity']], `headings at row ${position}`);
+      assert.deepEqual(rows.map((r) => r.description), ['Aspirin'], `headings at row ${position}`);
+    } else {
+      assert.deepEqual([mapping.header, mapping.skip], [false, 0], 'headings at row 6');
+      assert.equal(rows.length, 7);
+    }
+  }
+});
+
+test('a sheet with its headings first is read as before, whatever follows', () => {
+  const { mapping, rows } = read('Name\tLot\nAspirin\tL1\nTitle-like\t\nName\tLot');
+  assert.deepEqual([mapping.header, mapping.skip], [true, 0]);
+  assert.deepEqual(rows.map((r) => r.description), ['Aspirin', 'Title-like', 'Name']);
+});
+
+test('a one-row sheet is a sample, even with a cell named like a heading', () => {
+  for (const fields of [LAB_FIELDS, PORTAL_FIELDS]) {
+    const { mapping, rows } = read('Aspirin\tL1\tTest', fields);
+    assert.deepEqual([mapping.header, mapping.skip], [false, 0]);
+    assert.equal(rows.length, 1);
+  }
+  assert.deepEqual(read('Aspirin\tL1\tTest', LAB_FIELDS).rows[0], { problems: {}, details: [], description: 'Aspirin', batch_no: 'L1', client_ref: 'Test' });
+});
+
+test('saying the first row is headings, or that there are none, drops the skipped title rows', () => {
+  const grid = gridFromText('Sample submission form\nName\tLot\nAspirin\tL1', 'paste');
+  const guessed = guessMapping(grid, LAB_FIELDS);
+  const plain = withHeader(grid, guessed, false);
+  assert.deepEqual(plain, { header: false, skip: 0, columns: [{ label: 'Column A', use: 'description' }, { label: 'Column B', use: 'batch_no' }] });
+  assert.deepEqual(readSheet(grid, plain).rows.map((r) => r.description), ['Sample submission form', 'Name', 'Aspirin']);
+  assert.deepEqual(readSheet(grid, withHeader(grid, guessed, true)).rows.map((r) => r.description), ['Name', 'Aspirin']);
+});
+
 test('the client says whether the first row is headings; columns keep their uses', () => {
   const grid = gridFromText('Sample\nAspirin', 'paste');
   const headed = withHeader(grid, guessMapping(grid, PORTAL_FIELDS), true);
-  assert.deepEqual(headed, { header: true, columns: [{ label: 'Sample', use: 'description' }] });
+  assert.deepEqual(headed, { header: true, skip: 0, columns: [{ label: 'Sample', use: 'description' }] });
   assert.deepEqual(readSheet(grid, headed).rows.map((r) => r.description), ['Aspirin']);
 
   const four = gridFromText('Qty\tBatch\tName\tShelf\nx3\tL1\tAspirin\tA2', 'paste');
@@ -153,6 +203,10 @@ test('rows that did not fit stay as a sheet, headings kept', () => {
   const m = guessMapping(grid, PORTAL_FIELDS);
   assert.deepEqual(dropRows(grid, m, 2), [['Name', 'Note'], ['C', 'z']]);
   assert.deepEqual(dropRows(grid.slice(1), withHeader(grid.slice(1), m, false), 1), [['B', ''], ['C', 'z']]);
+  const titled = gridFromText('Form\nName\tLot\nA\tx\nB\ty', 'paste');
+  const left = dropRows(titled, guessMapping(titled, PORTAL_FIELDS), 1);
+  assert.deepEqual(left, [['Form'], ['Name', 'Lot'], ['B', 'y']]);
+  assert.deepEqual(readSheet(left, guessMapping(titled, PORTAL_FIELDS)).rows.map((r) => r.description), ['B']);
 });
 
 test('Tests requested stays as the client wrote it, whether or not the lab offers that test', () => {
