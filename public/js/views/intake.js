@@ -9,6 +9,7 @@ import { navigate, refreshNav, setQuery } from '../core/nav.js';
 import {
   pageHead, segmented, searchBox, priorityBadge, dueChip, fmtDateTime, plural, emptyState, badge, toast, showError, busy, confirmDialog, debounce,
 } from '../core/ui.js';
+import { assignAction } from './intake-assign.js';
 
 // The tabs, in order. Each is a stage of intake; the server returns the Samples of the tab asked for.
 const TABS = [
@@ -21,6 +22,7 @@ const TABS = [
 // disabled with `locks[key]` beside it otherwise. `bulk` is set for the ones that also apply to a selection.
 const ACTIONS = [
   { key: 'accept', label: 'Accept', icon: 'check', primary: true, bulk: { path: '/api/samples/accept', done: 'accepted' } },
+  assignAction, // opens its own dialog (`run`) instead of posting to /api/samples/<id>/<key>
 ];
 
 const FILTERS = ['client', 'project', 'priority', 'overdue'];
@@ -28,7 +30,7 @@ const FILTERS = ['client', 'project', 'priority', 'overdue'];
 function actionButtons(s) {
   return html`<span class="row nowrap" style="gap:6px">${ACTIONS.map((a) => html`
     <button class="btn sm ${a.primary && s.can[a.key] ? 'primary' : ''}" data-act="${a.key}" data-id="${s.id}" data-code="${s.code}" ${s.can[a.key] ? '' : raw('disabled')} title="${s.locks[a.key] ?? ''}">${icon(a.icon, { size: 13 })}${a.label}</button>`)}</span>
-    ${ACTIONS.map((a) => (s.locks[a.key] ? html`<span class="sub-line" data-why="${a.key}">${s.locks[a.key]}</span>` : ''))}`;
+    ${ACTIONS.map((a) => (s.locks[a.key] ? html`<span class="sub-line" style="white-space:normal;max-width:300px" data-why="${a.key}">${s.locks[a.key]}</span>` : ''))}`;
 }
 
 function groupTable(group) {
@@ -159,14 +161,20 @@ export async function render(ctx) {
       host.querySelectorAll('[data-all]').forEach((c) => { c.checked = on; });
       sync();
     });
-    host.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => busy(b, async () => {
-      await api.post(`/api/samples/${b.dataset.id}/${b.dataset.act}`);
-      toast(`${b.dataset.code} ${ACTIONS.find((a) => a.key === b.dataset.act).bulk?.done ?? 'updated'}`);
-      await after();
-    })));
+    const outcomesHost = () => ctx.el.querySelector('[data-outcomes-host]');
+    host.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => {
+      const a = ACTIONS.find((x) => x.key === b.dataset.act);
+      if (a.run) return a.run({ ids: [Number(b.dataset.id)], outcomes: outcomesHost(), after });
+      return busy(b, async () => {
+        await api.post(`/api/samples/${b.dataset.id}/${b.dataset.act}`);
+        toast(`${b.dataset.code} ${a.bulk?.done ?? 'updated'}`);
+        await after();
+      });
+    }));
     host.querySelectorAll('[data-bulk]').forEach((b) => b.addEventListener('click', async () => {
       const a = ACTIONS.find((x) => x.key === b.dataset.bulk);
       const ids = picked();
+      if (a.run) return a.run({ ids, outcomes: outcomesHost(), after });
       if (!await confirmDialog({ title: `${a.label} ${plural(ids.length, 'sample')}`, message: 'Each sample is decided on its own and the outcome of every one is listed.', confirmLabel: a.label })) return;
       await busy(b, async () => {
         const r = await api.post(a.bulk.path, { sample_ids: ids });
