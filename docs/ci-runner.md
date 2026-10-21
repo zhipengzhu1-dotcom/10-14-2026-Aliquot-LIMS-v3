@@ -81,6 +81,28 @@ scripts/animated-runner.sh stop
 
 It stops the slot loops, removes the containers, and deletes the `animated-runner-*` registrations from the repo. It refuses while a runner is running a job, because removing that runner's container fails the job, and exits 1 naming the busy runner. Wait until `status` shows no runner as busy, then run `stop` again. It also refuses when it cannot read the runners from GitHub. `stop --force` stops anyway, and a running job is then cancelled and GitHub shows it as failed.
 
+## Watching a PR
+
+`scripts/ci-watch.js` polls a pull request until CI reaches a verdict, then exits. Run it from any clone of this repo:
+
+```sh
+npm run ci:watch -- 36            # report when PR 36 is ready, merge nothing
+npm run ci:watch -- 36 --merge    # merge PR 36 once every check passes
+```
+
+With `--merge` it merges with a merge commit, never a squash, through `gh pr merge --merge --match-head-commit <sha>`. If a push lands between the poll and the merge, GitHub refuses the merge, and the watch carries on with the new head. It never merges after a failed, cancelled or timed-out check. It prints the failing job and the end of its log and exits 1.
+
+`--require-verdict` also waits for an independent verdict. That is a comment that starts with `PASS` or `PASS+NOTES` (or `Verdict: PASS`) and names the head commit. A comment that names no commit counts when it comes after the head commit. A later `FAIL` on the head blocks the merge.
+
+The watch stops and explains instead of waiting forever:
+
+- **Stuck.** A job queued for more than 3 minutes, running for more than 10, or the whole watch past 30. A run usually takes about 35 seconds. Change the limits with `--queued`, `--running` and `--timeout`, in minutes.
+- **Looping.** Three or more runs of the same head commit ended without passing, the same job failed twice in a row on the same first error, or more than five workflow runs were created for one head commit.
+
+For either, it reads the runner registrations, `docker info`, `scripts/animated-runner.sh status`, the slot logs and the Mac's sleep log, and names the likely cause with the command to run. Those causes are no runner online, slots that serve another repo, Docker Desktop stopped, both runners busy with other runs, and a job frozen by a sleeping Mac. A test that fails the same way every run is a real failure, not the runner. The watch never runs `stop` or `start` itself.
+
+Exit codes are 0 when the pull request is ready or merged, 1 when it failed, is stuck, loops or is blocked (closed, draft or conflicting), and 2 on a usage error.
+
 ## Update the image
 
 GitHub refuses a runner that is too far behind its latest release, so update the digest when a new runner version comes out.
