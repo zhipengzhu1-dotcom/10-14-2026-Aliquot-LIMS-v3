@@ -7,6 +7,7 @@ import { HttpError, bad, guard, flags, locks, queued } from '../http.js';
 import { INTAKE_PENDING, INTAKE_HOLD, INTAKE_ACCEPTED } from '../lookups.js';
 import { idList, nowIso, today } from '../util.js';
 import { SAMPLE_QUEUES, SAMPLE_RULES } from '../workflow.js';
+import { postMessage } from './portal.js';
 
 /** Moves Sample `s` to intake state `intake` and records who decided it, when and why, in one transaction. */
 function decide(ctx, s, decision, { intake, summary, reason = null }) {
@@ -16,10 +17,37 @@ function decide(ctx, s, decision, { intake, summary, reason = null }) {
   });
 }
 
+/** Posts `body` as a message from the signed-in person to the thread of the Submission Sample `sample` arrived in; nothing when it was received directly. */
+export function tellClient(ctx, sample, body) {
+  const thread = get(`SELECT t.id FROM portal_threads t JOIN portal_submissions su ON su.id = t.submission_id, json_each(su.sample_ids) j
+    WHERE su.sample_ids IS NOT NULL AND j.value = ?`, sample.id);
+  if (thread) postMessage(thread.id, { user: ctx.user, body });
+}
+
 export function acceptSample(ctx, sampleId) {
   const s = mustGet('SELECT * FROM samples WHERE id = ?', sampleId, 'Sample');
   guard(SAMPLE_RULES.accept(s, ctx.user));
   decide(ctx, s, 'Accepted', { intake: INTAKE_ACCEPTED, summary: 'Sample accepted at intake review' });
+  return { ok: true };
+}
+
+/** Puts a Pending review Sample on hold and asks the client `reason` in its Submission's thread, if it has one. */
+export function holdSample(ctx, sampleId, rawReason) {
+  const s = mustGet('SELECT * FROM samples WHERE id = ?', sampleId, 'Sample');
+  guard(SAMPLE_RULES.hold(s, ctx.user));
+  const reason = String(rawReason ?? '').trim();
+  if (!reason) throw bad('Give a reason for holding this sample — it is sent to the client as a question', 'REASON_REQUIRED');
+  tx(() => {
+    decide(ctx, s, 'Held', { intake: INTAKE_HOLD, summary: 'Sample put on hold at intake review', reason });
+    tellClient(ctx, s, `Question about ${s.code}, which is on hold until we hear from you: ${reason}`);
+  });
+  return { ok: true };
+}
+
+export function releaseSample(ctx, sampleId) {
+  const s = mustGet('SELECT * FROM samples WHERE id = ?', sampleId, 'Sample');
+  guard(SAMPLE_RULES.release(s, ctx.user));
+  decide(ctx, s, 'Released', { intake: INTAKE_PENDING, summary: 'Sample released from hold at intake review' });
   return { ok: true };
 }
 
@@ -46,7 +74,7 @@ export function acceptSamples(ctx, ids) {
 
 // The rules the screen offers on a Sample, each with its refusal message for the screen to show beside a disabled action.
 // A later ticket adds its rule's name here and its button to ACTIONS in public/js/views/intake.js.
-const SCREEN_ACTIONS = ['accept'];
+const SCREEN_ACTIONS = ['accept', 'hold', 'release'];
 
 // Each tab is a stage of intake: the Queue it reads and the intake state its Samples are at.
 const TABS = {
@@ -95,4 +123,6 @@ export default function routes(r) {
 
   r.post('/api/samples/accept', (ctx) => acceptSamples(ctx, idList(ctx.body.sample_ids)));
   r.post('/api/samples/:id/accept', (ctx) => acceptSample(ctx, +ctx.params.id));
+  r.post('/api/samples/:id/hold', (ctx) => holdSample(ctx, +ctx.params.id, ctx.body.reason));
+  r.post('/api/samples/:id/release', (ctx) => releaseSample(ctx, +ctx.params.id));
 }

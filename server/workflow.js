@@ -234,6 +234,18 @@ export const SAMPLE_RULES = {
     if (s.intake === INTAKE_ACCEPTED) return bad('This sample is already accepted');
     if (!SAMPLE_OPEN.includes(s.status)) return bad(`Sample is ${s.status.toLowerCase()} and can't be accepted`);
   },
+
+  // Intake review: setting a Sample aside while the client is asked a question, and taking it back up.
+  hold(s, me) {
+    if (!can(me, 'samples.review')) return forbidden();
+    if (s.intake === INTAKE_HOLD) return bad('This sample is already on hold');
+    if (s.intake !== INTAKE_PENDING) return bad('Only a sample waiting for intake review can be put on hold');
+    if (!SAMPLE_OPEN.includes(s.status)) return bad(`Sample is ${s.status.toLowerCase()} and can't be put on hold`);
+  },
+  release(s, me) {
+    if (!can(me, 'samples.review')) return forbidden();
+    if (s.intake !== INTAKE_HOLD) return bad('This sample is not on hold');
+  },
 };
 
 export const SAMPLE_QUEUES = {
