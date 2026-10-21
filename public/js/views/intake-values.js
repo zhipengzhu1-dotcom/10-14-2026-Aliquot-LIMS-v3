@@ -84,11 +84,11 @@ function thread(r) {
 function testCorrections(r) {
   const c = r.corrections;
   return card({
-    title: 'Tests',
+    title: 'Add or cancel tests',
     sub: plural(c.tests.filter((t) => t.status !== 'Cancelled').length, 'test'),
     actions: html`<button class="btn sm" data-add-test ${c.can.addTests ? '' : raw('disabled')} title="${c.locks.addTests ?? ''}">${icon('plus', { size: 13 })}Add test</button>`,
     flush: true,
-    body: html`<ul class="list">${c.tests.map((t) => html`<li data-test="${t.id}"><div class="grow">
+    body: html`<ul class="list">${c.tests.map((t) => html`<li data-correct-test="${t.id}"><div class="grow">
       <div class="title"><span class="code">${t.code}</span> ${t.method_title}</div>
       <div class="meta">${t.method_code} v${t.method_version}</div>${why(`cancel-${t.id}`, t.locks.cancel)}</div>
       ${statusBadge(t.status)}

@@ -8,7 +8,7 @@ import { HttpError, bad, guard, flags, queued, workQueue } from '../http.js';
 import { assertCan } from '../auth.js';
 import { getNumber, labSettings } from '../settings.js';
 import {
-  SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, CUSTODY_ACTIONS, METHOD_USABLE, SAMPLE_OPEN, INTAKE_PENDING, INTAKE_ACCEPTED, priorityRank, rolesWith,
+  SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, CUSTODY_ACTIONS, SAMPLE_OPEN, INTAKE_PENDING, INTAKE_ACCEPTED, priorityRank, rolesWith,
 } from '../lookups.js';
 import { clean, cleanAll, nowIso, today, addBusinessDays, dateOf, idList, likeTerm, limitParam, round } from '../util.js';
 import {
@@ -17,6 +17,7 @@ import {
 } from '../workflow.js';
 import { intakeHistory } from '../intake-values.js';
 import { INVESTIGATION_RULES } from '../investigations.js';
+import { methodProblem } from '../intake-feasibility.js';
 import { PROJECT_RULES } from './business.js';
 import { ENTRY_QUEUES, ENTRY_RULES } from '../notebook.js';
 
@@ -28,8 +29,8 @@ function loadUsableMethods(ids) {
   return ids.map((id) => {
     const m = get('SELECT * FROM methods WHERE id = ?', id);
     if (!m) throw bad('Unknown method selected');
-    if (!METHOD_USABLE.includes(m.status)) throw bad(`${m.code} v${m.version} is ${m.status.toLowerCase()} and cannot be used for testing`);
-    if (!get('SELECT 1 FROM method_analytes WHERE method_id = ?', m.id)) throw bad(`${m.code} has no result parameters defined yet`);
+    const problem = methodProblem(m);
+    if (problem) throw bad(problem);
     return m;
   });
 }

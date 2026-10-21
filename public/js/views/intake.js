@@ -10,6 +10,7 @@ import { openReview } from './intake-review.js';
 import {
   pageHead, segmented, searchBox, priorityBadge, dueChip, fmtDateTime, plural, emptyState, badge, toast, showError, busy, confirmDialog, debounce, promptReason,
 } from '../core/ui.js';
+import { openReview } from './intake-review.js';
 
 // The tabs, in order. Each is a stage of intake; the server returns the Samples of the tab asked for.
 const TABS = [
@@ -41,8 +42,8 @@ function groupTable(group) {
     <tbody>${group.samples.map((s) => html`<tr data-row="${s.id}">
       <td class="sel">${pickable(s) ? html`<input type="checkbox" data-pick value="${s.id}" aria-label="Select ${s.code}">` : ''}</td>
       <td class="title-cell"><a class="code" href="/samples/${s.id}">${s.code}</a> <strong>${s.description}</strong>
-        <button class="btn sm ghost" data-review="${s.id}">${icon('search', { size: 13 })}Review</button>
-        <span class="sub-line">${[s.batch_no && `Batch ${s.batch_no}`, s.client_ref].filter(Boolean).join(' · ') || ' '}</span></td>
+        <span class="sub-line">${[s.batch_no && `Batch ${s.batch_no}`, s.client_ref].filter(Boolean).join(' · ') || ' '}</span>
+        <button class="btn sm ghost" data-review="${s.id}" data-code="${s.code}">${icon('eye', { size: 13 })}Review</button></td>
       <td><span title="${s.client_name}">${s.client_code}</span>${s.project_code ? html`<span class="sub-line">${s.project_code}</span>` : ''}</td>
       <td>${s.sample_type || html`<span class="muted">—</span>`}</td>
       <td class="num">${s.test_count}</td>
@@ -163,7 +164,7 @@ export async function render(ctx) {
       host.querySelectorAll('[data-all]').forEach((c) => { c.checked = on; });
       sync();
     });
-    host.querySelectorAll('[data-review]').forEach((b) => b.addEventListener('click', () => openReview(Number(b.dataset.review), { onChange: () => load() })));
+    host.querySelectorAll('[data-review]').forEach((b) => b.addEventListener('click', () => openReview(Number(b.dataset.review), { title: `Review ${b.dataset.code}`, onChange: () => load() })));
     host.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => busy(b, async () => {
       const a = ACTIONS.find((x) => x.key === b.dataset.act);
       const reason = a.ask ? await promptReason(a.ask) : undefined;

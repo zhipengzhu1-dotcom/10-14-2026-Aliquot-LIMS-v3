@@ -3,6 +3,8 @@
 
 import { all, get, ph, tx } from '../db.js';
 import { insert, update, mustGet } from '../repo.js';
+import { assertCan } from '../auth.js';
+import { testFeasibility } from '../intake-feasibility.js';
 import { HttpError, bad, guard, flags, locks, queued } from '../http.js';
 import { assertCan } from '../auth.js';
 import { INTAKE_PENDING, INTAKE_HOLD, INTAKE_ACCEPTED } from '../lookups.js';
@@ -127,11 +129,12 @@ export default function routes(r) {
     return { tab, counts: Object.fromEntries(Object.keys(TABS).map((name) => [name, rows[name].length])), groups: [...groups.values()] };
   });
 
-  // The review of one Sample: one key per section of the review pane, each computed in its own module.
+  // What the review pane shows for one Sample, one key per section, each computed in its own module: `tests` (the
+  // feasibility indicators of each open Test) and the values keys of `reviewValues`.
   r.get('/api/intake/samples/:id/review', (ctx) => {
     assertCan(ctx, 'samples.review');
     const s = mustGet('SELECT * FROM samples WHERE id = ?', +ctx.params.id, 'Sample');
-    return { ...reviewValues(s, ctx.user) };
+    return { ...reviewValues(s, ctx.user), tests: testFeasibility(s) };
   });
 
   r.post('/api/samples/accept', (ctx) => acceptSamples(ctx, idList(ctx.body.sample_ids)));
