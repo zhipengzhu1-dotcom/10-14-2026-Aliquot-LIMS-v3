@@ -6,7 +6,6 @@ import { insert, update, mustGet } from '../repo.js';
 import { assertCan } from '../auth.js';
 import { testFeasibility } from '../intake-feasibility.js';
 import { HttpError, bad, guard, flags, locks, queued } from '../http.js';
-import { assertCan } from '../auth.js';
 import { INTAKE_PENDING, INTAKE_HOLD, INTAKE_ACCEPTED } from '../lookups.js';
 import { idList, nowIso, today } from '../util.js';
 import { SAMPLE_QUEUES, SAMPLE_RULES, cancelSampleAndTests } from '../workflow.js';
