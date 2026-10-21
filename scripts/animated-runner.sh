@@ -61,6 +61,16 @@ case "${1:-}" in
     runner_online 90 || { echo "No animated-runner came online on $REPO within 90 s. The slots keep trying, and a first image pull can take longer. Read the slot logs in $LOGS and check that Docker Desktop runs." >&2; exit 1; }
     ;;
   stop)
+    # Removing a container mid-job fails that job, and GitHub then refuses to delete its runner.
+    if [[ ${2:-} != --force ]]; then
+      busy=$(gh api --paginate "repos/$REPO/actions/runners" \
+        --jq '.runners[] | select((.name | startswith("animated-runner-")) and .busy) | .name') ||
+        { echo "Could not read the runners on $REPO, so stop cannot tell whether a job runs. Run stop --force to stop anyway." >&2; exit 1; }
+      if [[ -n $busy ]]; then
+        echo "A job is running on $(echo $busy), and stop would fail it. Wait until status shows no runner as busy, or run stop --force." >&2
+        exit 1
+      fi
+    fi
     pkill -f 'animated-runner\.sh slot' || true
     for n in "${SLOTS[@]}"; do docker rm -f "animated-runner-$n" >/dev/null 2>&1 || true; done
     gh api --paginate "repos/$REPO/actions/runners" --jq '.runners[] | select(.name | startswith("animated-runner-")) | .id' |
@@ -80,5 +90,5 @@ case "${1:-}" in
     # A JIT runner deregisters after its job and the next pass registers a new one, so a few seconds without one is normal.
     runner_online 30 || { echo "The slots run but no animated-runner is online on $REPO. Read the slot logs in $LOGS." >&2; exit 1; }
     ;;
-  *) echo "usage: scripts/animated-runner.sh start|status|stop|slot 1|2" >&2; exit 2 ;;
+  *) echo "usage: scripts/animated-runner.sh start|status|stop [--force]|slot 1|2" >&2; exit 2 ;;
 esac
