@@ -46,7 +46,6 @@ agent-browser wait 'header.top nav.nav a[data-nav]'
 agent-browser click '.nav a[data-nav=submit]'
 agent-browser wait '#d-samples-0-description'
 agent-browser fill '#d-samples-0-description' 'Portal verification sample'
-agent-browser eval 'document.activeElement.blur()'                # see the Send gotcha (issue #29)
 agent-browser wait --fn '!document.querySelector("button.js-send").disabled'
 agent-browser click 'button.js-send'                           # "Send to lab"
 agent-browser wait '.label-card .big'                          # "SUB-YYYY-NNNN"
@@ -69,7 +68,6 @@ End state that proves it:
 - **Behavior** (`portal.js`). The nav links render twice (desktop `.nav` and mobile `nav.tabbar`). Scope selectors to `.nav` on desktop and to `nav.tabbar` at phone width.
 - **Harness quirk** (`.send-bar` is `position: sticky; bottom: 0` in `portal.css`, and agent-browser refuses a covered click). On desktop the sticky `.send-bar` can cover buttons in the draft, and agent-browser refuses the click. Scroll the button into view first.
 - **Behavior** (`portal.js`). The send bar re-renders after every check. Wait on the `disabled` state of `button.js-send`, not a fixed time.
-- **App bug** ([issue #29](https://github.com/zhipengzhu1-dotcom/10-14-2026-Aliquot-LIMS-v3/issues/29)). The first "Send to lab" click after typing in a draft field does nothing. The click blurs the field, its `change` re-runs the check, and the send bar is redrawn with a new, disabled button between pointerdown and pointerup, so no click fires. The recipe above, without the blur, missed 3 of 3 times on 2026-10-18; with `agent-browser eval 'document.activeElement.blur()'` before the wait it sent 2 of 2. Blur first, and check `location.hash` after the click.
 - **Harness quirk** (`portal.js` calls `confirm()`, which agent-browser cannot answer). "Withdraw" on a submission (`.js-withdraw`) calls native `confirm()`, which blocks automation. Before clicking, run `agent-browser eval 'window.confirm=()=>true'`.
 - **Behavior** (`portal.js`). Portal toasts are a single `.toast` element, not the Staff app's `.toasts`: `agent-browser eval 'document.querySelector(".toast")?.textContent'`.
 - **Behavior** (`portal.js`, `boot.js`). The portal shows a splash and an `.arrive` animation, plus skeleton loaders after about 160 ms. Wait for content selectors, not fixed times.

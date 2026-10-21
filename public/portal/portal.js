@@ -1198,9 +1198,11 @@ function mountDesk(root) {
     setValue(e.target);
     changed();
   });
+  // Text fields are already recorded on input. Their change fires on blur, often from the click on Send to lab, and
+  // re-checking then would redraw the send bar under that click (#29).
   draftCol.addEventListener('change', (e) => {
     const el = e.target;
-    if (el.dataset.path) {
+    if (el.dataset.path && el.tagName === 'SELECT') {
       setValue(el);
       changed({ structure: el.dataset.path === 'priority' });
     } else if (el.dataset.method) {
