@@ -9,7 +9,7 @@ import {
   localDateTimeValue, todayIso, isoDate, person, badge, debounce,
 } from '../core/ui.js';
 import { stepper, signatureList, recordFooter, wireRecordFooter } from '../core/components.js';
-import { LAB_FIELDS, gridFromText, guessMapping, readSheet } from '/portal/sheet.js';
+import { LAB_FIELDS, gridFromText, guessMapping, readSheet, withHeader } from '/portal/sheet.js';
 
 const SAMPLE_STEPS = ['Received', 'In Testing', 'In Review', 'Approved', 'Reported'];
 const openLabels = (ids) => window.open(`/print/labels?ids=${ids.join(',')}`, '_blank');
@@ -284,19 +284,22 @@ export async function receive(ctx) {
       drawRows();
     }
     if (act === 'paste') {
-      const text = await openForm({
+      const pasted = await openForm({
         title: 'Paste from spreadsheet',
         size: 'lg',
         submitLabel: 'Add rows',
         body: html`<p class="span-2 muted">Copy rows from Excel or Google Sheets and paste below, heading row included. Without headings the columns are read in this order: <strong>Description, Batch, Client reference, Quantity, Container</strong>. Columns that fit none of ours are kept on each sample as the client's extra detail.</p>
-          ${field({ name: 'text', type: 'textarea', rows: 10, span: 2, autofocus: true, placeholder: 'Metformin HCl 500 mg\tMF5-2701\tACME-REL-2701\t2 × 100 tablets\tHDPE bottle' })}`,
-        onSubmit: (d) => d.text,
+          ${field({ name: 'text', type: 'textarea', rows: 10, span: 2, autofocus: true, placeholder: 'Metformin HCl 500 mg\tMF5-2701\tACME-REL-2701\t2 × 100 tablets\tHDPE bottle' })}
+          ${field({ label: 'Heading row', name: 'headings', type: 'select', span: 2, value: 'auto', options: [['auto', 'Find it automatically'], ['first', 'First row is column headings'], ['none', 'No headings: every row is a sample']] })}`,
+        onSubmit: (d) => (d.text ? d : null),
       });
-      if (!text) return undefined;
+      if (!pasted) return undefined;
       syncRowsFromDom();
-      const grid = gridFromText(text, 'paste');
+      const grid = gridFromText(pasted.text, 'paste');
+      const guessed = guessMapping(grid, LAB_FIELDS);
+      const mapping = pasted.headings === 'auto' ? guessed : withHeader(grid, guessed, pasted.headings === 'first');
       // The receive table has no place for a pick-list problem, so an unknown stage arrives blank for the receiver to choose.
-      const parsed = readSheet(grid, guessMapping(grid, LAB_FIELDS)).rows.map(({ problems, details, ...r }) => (details.length ? { ...r, details } : r));
+      const parsed = readSheet(grid, mapping).rows.map(({ problems, details, ...r }) => (details.length ? { ...r, details } : r));
       rows = [...filledRows(), ...parsed];
       drawRows();
       toast(`${plural(parsed.length, 'row')} added`);

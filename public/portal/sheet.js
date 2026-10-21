@@ -1,5 +1,5 @@
 // Reads a client's sample sheet, pasted from Excel, uploaded as .csv, or an .xlsx the server read, into sample rows.
-// Every source becomes a Grid (string[][] of display text, row 0 maybe headings). A Mapping says what each column
+// Every source becomes a Grid (string[][] of display text, maybe headings near the top). A Mapping says what each column
 // means; the client can change it before readSheet applies it. Pure functions with no imports, so the portal, the
 // lab and the tests load the same module.
 
@@ -100,34 +100,47 @@ export function gridFromText(text, kind) {
   return grid.map((r) => r.map((c) => c.trim())).filter((r) => r.some(Boolean));
 }
 
-// A client's sheet may carry more of its own headings than ours, so the first row is headings when it names more of
-// ours than the next row does, not when most of its cells are ours.
+// A client's sheet may carry more of its own headings than ours, so a row is headings when it names more of ours than
+// the next row does, not when most of its cells are ours. A client form can put a title above its headings.
+const HEADING_WINDOW = 5;
 const knownHeadings = (cells = []) => cells.filter((c) => fieldForHeading(c)).length;
-const isHeader = (grid) => knownHeadings(grid[0]) > knownHeadings(grid[1]);
+const outnumbers = (grid, i) => knownHeadings(grid[i]) > knownHeadings(grid[i + 1]);
+const headingRow = (grid) => {
+  const i = grid.slice(0, HEADING_WINDOW).findIndex((_, i) => knownHeadings(grid[i]) >= 2 && outnumbers(grid, i));
+  return i >= 0 ? i : outnumbers(grid, 0) ? 0 : -1;
+};
 
 const columnName = (i) => `Column ${i < 26 ? String.fromCharCode(65 + i) : i + 1}`;
 const widthOf = (grid) => Math.max(0, ...grid.map((r) => r.length));
-const labelsOf = (grid, header) => Array.from({ length: widthOf(grid) }, (_, i) => (header && grid[0][i]) || columnName(i));
+const labelsOf = (grid, header, skip = 0) => Array.from({ length: widthOf(grid) }, (_, i) => (header && grid[skip][i]) || columnName(i));
+// The grid's first sample row: past the rows above the headings and the headings themselves.
+const firstSample = (mapping) => mapping.skip + (mapping.header ? 1 : 0);
 
 /**
- * Mapping: { header, columns: [{ label, use }] }, one column per grid column. `use` is a field key from `fields`,
- * 'extra' (kept as detail on each sample) or 'ignore'; no field is used twice. With headings, each known heading
- * fills its field and any other column is extra. Without, columns follow the order of `fields`. A one-column sheet
- * is never read as having headings, so a first sample called "Code" is not lost; the client can say otherwise.
+ * Mapping: { header, skip, columns: [{ label, use }] }, one column per grid column. `header` says row `skip` is
+ * headings; the `skip` rows above it are neither samples nor detail. `use` is a field key from `fields`, 'extra' (kept
+ * as detail on each sample) or 'ignore'; no field is used twice. With headings, each known heading fills its field
+ * and any other column is extra. Without, columns follow the order of `fields`.
+ * The heading row is the first of the grid's first 5 rows that names at least 2 known headings and more than the row
+ * after it, so a title above the headings is skipped; failing that, row 0 is headings when it names more than row 1.
+ * A one-column or one-row sheet is never read as having headings, so a lone sample called "Code" or "Aspirin / L1 /
+ * Test" is not lost; the user can say otherwise with `withHeader`.
  */
 export function guessMapping(grid, fields) {
   const width = widthOf(grid);
-  const header = width > 1 && isHeader(grid);
+  const row = width > 1 && grid.length > 1 ? headingRow(grid) : -1;
+  const header = row >= 0;
+  const skip = Math.max(row, 0);
   const order = width === 1 ? ['description'] : fields;
   const taken = new Set();
-  const columns = labelsOf(grid, header).map((label, i) => {
-    if (!grid.slice(header ? 1 : 0).some((r) => r[i]) || (header && isRowNumber(grid[0][i]))) return { label, use: 'ignore' };
-    const field = header ? fieldForHeading(grid[0][i]) : order[i];
+  const columns = labelsOf(grid, header, skip).map((label, i) => {
+    if (!grid.slice(skip + (header ? 1 : 0)).some((r) => r[i]) || (header && isRowNumber(grid[skip][i]))) return { label, use: 'ignore' };
+    const field = header ? fieldForHeading(grid[skip][i]) : order[i];
     const use = field && fields.includes(field) && !taken.has(field) ? field : 'extra';
     taken.add(use);
     return { label, use };
   });
-  return { header, columns };
+  return { header, skip, columns };
 }
 
 /** Gives column `col` the use `use`. A field another column had moves off it to 'extra', so nothing is dropped. */
@@ -139,15 +152,16 @@ export function remap(mapping, col, use) {
   };
 }
 
-/** Says whether the grid's first row is headings: the columns are relabelled and keep their uses. */
+/** Says whether the grid's first row is headings, with no rows skipped: the columns are relabelled and keep their uses. */
 export function withHeader(grid, mapping, header) {
   const labels = labelsOf(grid, header);
-  return { header, columns: mapping.columns.map((c, i) => ({ ...c, label: labels[i] })) };
+  return { header, skip: 0, columns: mapping.columns.map((c, i) => ({ ...c, label: labels[i] })) };
 }
 
-/** What is left of a sheet once its first `n` sample rows are taken, headings kept. */
+/** What is left of a sheet once its first `n` sample rows are taken, the rows down to the headings kept. */
 export function dropRows(grid, mapping, n) {
-  return mapping.header ? [grid[0], ...grid.slice(1 + n)] : grid.slice(n);
+  const top = firstSample(mapping);
+  return [...grid.slice(0, top), ...grid.slice(top + n)];
 }
 
 /**
@@ -155,7 +169,7 @@ export function dropRows(grid, mapping, n) {
  * extra columns, empty cells left out) and `problems`, a message per field the client has to fix.
  */
 export function readSheet(grid, mapping) {
-  const rows = grid.slice(mapping.header ? 1 : 0).map((cells) => {
+  const rows = grid.slice(firstSample(mapping)).map((cells) => {
     const row = { problems: {}, details: [] };
     const labelOf = {};
     mapping.columns.forEach(({ label, use }, i) => {
