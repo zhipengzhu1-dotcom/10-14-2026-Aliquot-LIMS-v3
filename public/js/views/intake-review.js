@@ -7,9 +7,10 @@ import { api } from '../core/api.js';
 import { openModal, showError } from '../core/ui.js';
 import { section as values, intakeBadge } from './intake-values.js';
 import { feasibilitySection } from './intake-feasibility.js';
+import { filesSection } from './intake-files.js';
 
 // One entry per section, in the order shown: { render(review), wire?(root, review, { reload }) }, each kept in its own file.
-const SECTIONS = [values, { render: feasibilitySection }];
+const SECTIONS = [values, { render: feasibilitySection }, filesSection];
 
 /** Opens the review of Sample `sampleId`; `onChange` runs after a correction so the screen behind can reload. */
 export async function openReview(sampleId, { onChange } = {}) {
