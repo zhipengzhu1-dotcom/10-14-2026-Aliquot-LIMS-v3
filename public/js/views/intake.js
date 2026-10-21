@@ -10,6 +10,7 @@ import { askHoldReason } from './intake-hold.js';
 import {
   pageHead, segmented, searchBox, priorityBadge, dueChip, fmtDateTime, plural, emptyState, badge, toast, showError, busy, confirmDialog, debounce, promptReason,
 } from '../core/ui.js';
+import { assignAction } from './intake-assign.js';
 import { openReview } from './intake-review.js';
 
 // The tabs, in order. Each is a stage of intake; the server returns the Samples of the tab asked for.
@@ -34,6 +35,7 @@ const ACTIONS = [
   { key: 'hold', label: 'Hold', icon: 'clock', ask: askHoldReason, done: 'put on hold', tabs: ['pending'] },
   { key: 'release', label: 'Release', icon: 'undo', done: 'released', tabs: ['hold'] },
   { key: 'reject', label: 'Reject', icon: 'x', done: 'rejected', ask: askRejectReason },
+  assignAction, // opens its own dialog (`run`) instead of posting to /api/samples/<id>/<key>
 ];
 
 const FILTERS = ['client', 'project', 'priority', 'overdue'];
@@ -42,7 +44,7 @@ function actionButtons(s, tab) {
   const shown = ACTIONS.filter((a) => !a.tabs || a.tabs.includes(tab));
   return html`<span class="row nowrap" style="gap:6px">${shown.map((a) => html`
     <button class="btn sm ${a.primary && s.can[a.key] ? 'primary' : ''}" data-act="${a.key}" data-id="${s.id}" data-code="${s.code}" ${s.can[a.key] ? '' : raw('disabled')} title="${s.locks[a.key] ?? ''}">${icon(a.icon, { size: 13 })}${a.label}</button>`)}</span>
-    ${shown.map((a) => (s.locks[a.key] ? html`<span class="sub-line" data-why="${a.key}">${s.locks[a.key]}</span>` : ''))}`;
+    ${shown.map((a) => (s.locks[a.key] ? html`<span class="sub-line" style="white-space:normal;max-width:300px" data-why="${a.key}">${s.locks[a.key]}</span>` : ''))}`;
 }
 
 function groupTable(group, tab) {
@@ -174,9 +176,11 @@ export async function render(ctx) {
       host.querySelectorAll('[data-all]').forEach((c) => { c.checked = on; });
       sync();
     });
-    host.querySelectorAll('[data-review]').forEach((b) => b.addEventListener('click', () => openReview(b.dataset.review, { title: `Review ${b.dataset.code}` })));
+    const outcomesHost = () => ctx.el.querySelector('[data-outcomes-host]');
+    host.querySelectorAll('[data-review]').forEach((b) => b.addEventListener('click', () => openReview(Number(b.dataset.review), { onChange: () => load() })));
     host.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', async () => {
       const a = ACTIONS.find((x) => x.key === b.dataset.act);
+      if (a.run) return a.run({ ids: [Number(b.dataset.id)], outcomes: outcomesHost(), after });
       let body;
       if (a.ask) {
         const group = data.groups.find((g) => g.samples.some((s) => s.id === Number(b.dataset.id)));
@@ -192,6 +196,7 @@ export async function render(ctx) {
     host.querySelectorAll('[data-bulk]').forEach((b) => b.addEventListener('click', async () => {
       const a = ACTIONS.find((x) => x.key === b.dataset.bulk);
       const ids = picked();
+      if (a.run) return a.run({ ids, outcomes: outcomesHost(), after });
       if (!await confirmDialog({ title: `${a.label} ${plural(ids.length, 'sample')}`, message: 'Each sample is decided on its own and the outcome of every one is listed.', confirmLabel: a.label })) return;
       await busy(b, async () => {
         const r = await api.post(a.bulk.path, { sample_ids: ids });
