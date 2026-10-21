@@ -31,6 +31,8 @@ A separate sign-in at `/portal/` where a client's contacts follow their own samp
 
 ## Driving it with agent-browser
 
+Before merging a change that touches the portal, run the portal browser tests: `node --test test/portal-send.test.js test/portal-edge-cases.test.js` (they skip without agent-browser, so CI does not run them).
+
 Run the viewport and reduced-motion setup from SKILL.md first. Without it the splash covers the nav in the new tab and the drive fails.
 
 ```bash
