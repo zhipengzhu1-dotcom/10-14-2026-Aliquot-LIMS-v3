@@ -5,32 +5,34 @@
 
 import { all, get, ph } from '../db.js';
 import { update } from '../repo.js';
-import { HttpError, bad, locks } from '../http.js';
+import { HttpError, bad, notFound, locks } from '../http.js';
 import { can } from '../auth.js';
 import { rolesWith } from '../lookups.js';
 import { clean, idList } from '../util.js';
 import { TEST_EDITABLE, TEST_RULES, TEST_SELECT, SAMPLE_RULES, assignBlocker, isQualified } from '../workflow.js';
 
-/** The outcome line for a refusal `e` on Test `t` (or on Sample `sample` when it has no Test to name). */
+/** One outcome line, naming the Test `t` and its Sample (or only `sample`, or only a Test id) as far as they are known. */
+const outcome = (t, sample, result) => ({
+  test_id: t?.id ?? null, code: t?.code ?? null, sample_id: t?.sample_id ?? sample?.id ?? null, sample_code: t?.sample_code ?? sample?.code ?? null,
+  method_code: t?.method_code ?? null, ...result,
+});
+
+/** The outcome line for refusal `e` of Test `t`, or of Sample `sample` when it has no Test to name. */
 function refusal(e, t, sample) {
   if (!(e instanceof HttpError)) throw e;
-  return {
-    test_id: t?.id ?? null, code: t?.code ?? null, sample_id: t?.sample_id ?? sample?.id ?? null, sample_code: t?.sample_code ?? sample?.code ?? null,
-    method_code: t?.method_code ?? null, ok: false, status: e.status, error_code: e.code ?? null, error: e.message,
-  };
+  return outcome(t, sample, { ok: false, status: e.status, error_code: e.code ?? null, error: e.message });
 }
 
-/** The Tests still waiting for an analyst on Sample `sampleId`, whatever the Sample's intake state, so a refusal is reported per Test. */
+/** Whatever the Sample's intake state, so that a refusal is reported per Test. */
 const unassignedOf = (sampleId) => all(`${TEST_SELECT} WHERE t.sample_id = ? AND t.analyst_id IS NULL AND t.status IN (${ph(TEST_EDITABLE)}) ORDER BY t.id`, sampleId, ...TEST_EDITABLE);
 
-/** The analyst a body names, or the refusal when there is none. */
 function analystOf(body) {
   const analyst = body.analyst_id ? get('SELECT * FROM users WHERE id = ?', +body.analyst_id) : null;
   if (!analyst || !analyst.active || !can(analyst, 'tests.perform')) throw bad('Choose an active analyst');
   return analyst;
 }
 
-/** Assigns the Tests of `sample_ids` (every Test still unassigned) and the Tests of `test_ids` to one analyst, Test by Test. */
+/** A Sample id in `sample_ids` stands for every Test on it still unassigned. */
 export function assignEach(ctx, body) {
   const sampleIds = idList(body.sample_ids);
   const testIds = idList(body.test_ids);
@@ -43,7 +45,7 @@ export function assignEach(ctx, body) {
   for (const id of sampleIds) {
     const sample = get('SELECT id, code FROM samples WHERE id = ?', id);
     if (!sample) {
-      results.push({ test_id: null, code: null, sample_id: id, sample_code: null, method_code: null, ok: false, status: 404, error_code: 'NOT_FOUND', error: 'Sample not found' });
+      results.push(refusal(notFound('Sample'), null, { id }));
       continue;
     }
     const tests = unassignedOf(id);
@@ -53,7 +55,7 @@ export function assignEach(ctx, body) {
   for (const id of testIds) {
     const t = get(`${TEST_SELECT} WHERE t.id = ?`, id);
     if (t) wanted.set(id, t);
-    else results.push({ test_id: id, code: null, sample_id: null, sample_code: null, method_code: null, ok: false, status: 404, error_code: 'NOT_FOUND', error: 'Test not found' });
+    else results.push(refusal(notFound('Test'), { id }));
   }
 
   for (const t of wanted.values()) {
@@ -63,7 +65,7 @@ export function assignEach(ctx, body) {
       continue;
     }
     update(ctx, 'tests', t.id, { analyst_id: analyst.id, due_date: due }, { summary: `Assigned to ${analyst.full_name}` });
-    results.push({ test_id: t.id, code: t.code, sample_id: t.sample_id, sample_code: t.sample_code, method_code: t.method_code, ok: true });
+    results.push(outcome(t, null, { ok: true }));
   }
   const assigned = results.filter((x) => x.ok).length;
   return { results, assigned, refused: results.length - assigned };

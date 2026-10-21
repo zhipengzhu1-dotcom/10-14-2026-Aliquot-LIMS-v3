@@ -8,13 +8,14 @@ import { state } from '../core/state.js';
 import { icon } from '../core/icons.js';
 import { card, kv, badge, statusBadge, fmtDateTime, plural, field, openForm, promptReason, toast, showError, busy } from '../core/ui.js';
 
-const INTAKE_TONES = { 'Pending review': 'blue', 'On hold': 'amber', Accepted: 'green' };
-export const intakeBadge = (intake) => badge(intake, INTAKE_TONES[intake] ?? 'gray');
+export const intakeBadge = (intake) => {
+  const { pending, hold, accepted } = state.lookups.intakeStates;
+  return badge(intake, { [pending]: 'blue', [hold]: 'amber', [accepted]: 'green' }[intake] ?? 'gray');
+};
 
 const dash = html`<span class="muted">—</span>`;
 const show = (v) => (v === null || v === '' || v === undefined ? dash : v);
 
-// The fields a manager may correct in review, with how each is entered.
 const CORRECTIONS = [
   { key: 'description', label: 'Description', required: true, span: 2 },
   { key: 'batch_no', label: 'Batch / lot' },
@@ -147,7 +148,6 @@ async function cancelTest(button, reload) {
   });
 }
 
-/** The values half of the review pane: `render(review)` is its markup, `wire(root, review, { reload })` its actions. */
 export const section = {
   key: 'values',
   render: (r) => html`<div class="stack" data-section="values">${comparison(r)}${testCorrections(r)}${receipt(r)}${clientNotes(r)}${thread(r)}</div>`,

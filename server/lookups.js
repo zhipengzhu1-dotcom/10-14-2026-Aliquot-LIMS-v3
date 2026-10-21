@@ -16,7 +16,6 @@ export const PERMISSIONS = {
   'samples.edit': ['admin', 'manager', 'scientist', 'analyst'],
   'samples.dispose': ['admin', 'manager', 'qa'],
   'tests.assign': ['manager', 'scientist'],
-  // Intake review: deciding whether a received Sample is accepted before its Tests are assigned.
   'samples.review': ['manager', 'scientist'],
   'tests.perform': ['manager', 'scientist', 'analyst'],
   'tests.review': ['manager', 'scientist', 'qa'],
@@ -188,6 +187,7 @@ export function lookups() {
     stages: STAGES,
     receiptConditions: RECEIPT_CONDITIONS,
     sampleStatuses: SAMPLE_STATUSES,
+    intakeStates: { pending: INTAKE_PENDING, hold: INTAKE_HOLD, accepted: INTAKE_ACCEPTED },
     custodyActions: CUSTODY_ACTIONS,
     testStatuses: TEST_STATUSES,
     investigationTypes: Object.keys(INVESTIGATION_TYPES),

@@ -5,6 +5,7 @@ import { html } from '../core/html.js';
 import { api } from '../core/api.js';
 import { refreshNav } from '../core/nav.js';
 import { plural, badge, field, openForm, toast } from '../core/ui.js';
+import { showOutcomes } from './intake-outcomes.js';
 
 /** Analysts in the order they are best offered the work: qualified on the most Methods first, then the lightest workload. */
 function ranked(options) {
@@ -43,15 +44,6 @@ export async function assignDialog(sampleIds) {
   });
 }
 
-/** The card listing the outcome of every Test in `r`, with the server's reason for each refusal. */
-function outcomePanel(r) {
-  return html`<section class="card mb" data-outcomes><header class="card-head"><div><h2>${plural(r.assigned, 'test')} assigned${r.refused ? `, ${r.refused} refused` : ''}</h2>
-    <p class="sub">Each test was decided on its own, so a refusal does not stop the others.</p></div><div class="card-actions"><button class="btn sm ghost" data-dismiss>Dismiss</button></div></header>
-    <ul class="list">${r.results.map((x) => html`<li><div class="grow"><span class="code">${x.sample_code ?? `#${x.sample_id}`}</span> ${x.method_code ?? ''} ${x.ok ? badge('Assigned', 'green') : badge('Refused', 'red')}
-      ${x.ok ? '' : html`<span class="sub-line">${x.error}</span>`}</div></li>`)}</ul></section>`;
-}
-
-/** The Assign action of the screen: opens the dialog for the Samples chosen, reports each Test's outcome, then reloads. */
 export const assignAction = {
   key: 'assign',
   label: 'Assign',
@@ -63,7 +55,6 @@ export const assignAction = {
     toast(`${plural(r.assigned, 'test')} assigned${r.refused ? `, ${r.refused} refused` : ''}`, r.refused ? 'info' : 'success');
     refreshNav();
     await after();
-    outcomes.innerHTML = String(outcomePanel(r));
-    outcomes.querySelector('[data-dismiss]').addEventListener('click', () => { outcomes.innerHTML = ''; });
+    showOutcomes(outcomes, { noun: 'test', verb: 'assigned', done: 'Assigned', rows: r.results.map((x) => ({ label: `${x.sample_code ?? `#${x.sample_id}`} ${x.method_code ?? ''}`.trim(), ok: x.ok, error: x.error })) });
   },
 };

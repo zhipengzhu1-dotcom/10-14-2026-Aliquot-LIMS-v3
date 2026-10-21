@@ -205,7 +205,6 @@ const SAMPLE_LABEL = { Received: 'Received', 'Awaiting review': 'Awaiting review
 const SAMPLE_TONE = { Received: 'info', 'Awaiting review': 'info', 'On hold': 'warn', Accepted: 'accent', 'In Testing': 'accent', 'In Review': 'accent', Approved: 'accent', Reported: 'ok', Cancelled: 'bad', Disposed: '' };
 const INTAKE_STATE = { 'Pending review': 'Awaiting review', 'On hold': 'On hold', Accepted: 'Accepted' };
 const sampleState = (s) => (s.status === 'Received' && INTAKE_STATE[s.intake]) || s.status;
-// The line under a Sample's progress that says what the state means for the client.
 const SAMPLE_NOTE = {
   'Awaiting review': 'The lab is checking this sample against what you sent. We will message you if we have a question.',
   'On hold': 'We have paused this sample until we hear from you. Please reply to our question in your messages.',

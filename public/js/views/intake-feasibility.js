@@ -26,7 +26,6 @@ function testRow(t) {
   </tr>`;
 }
 
-/** The section for the review pane: `review.tests` from GET /api/intake/samples/:id/review. */
 export function feasibilitySection(review) {
   const tests = review.tests ?? [];
   return html`<section data-section="feasibility">

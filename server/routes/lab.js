@@ -326,7 +326,7 @@ export default function routes(r) {
     if (q.status) { const list = String(q.status).split(','); where.push(`t.status IN (${ph(list)})`); params.push(...list); }
     if (q.work) { const ids = workFilter(ctx, q.work, 'id'); where.push(`t.id IN (${ph(ids)})`); params.push(...ids); }
     if (q.analyst_id) { where.push('t.analyst_id = ?'); params.push(+q.analyst_id); }
-    // Tests on a Sample still waiting for intake review cannot be assigned yet, so they are not unassigned work.
+    // Cannot be assigned until the Sample is accepted, so not yet unassigned work.
     if (q.unassigned) { where.push('t.analyst_id IS NULL AND s.intake = ?'); params.push(INTAKE_ACCEPTED); }
     if (q.method_id) { where.push('t.method_id = ?'); params.push(+q.method_id); }
     if (q.sample_id) { where.push('t.sample_id = ?'); params.push(+q.sample_id); }

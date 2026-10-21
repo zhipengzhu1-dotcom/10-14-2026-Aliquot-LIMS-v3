@@ -1,15 +1,15 @@
 // Intake review: a received Sample waits here for a person with `samples.review` to decide on it before its Tests
 // can be assigned. The rules (`SAMPLE_RULES.accept`) live in ../workflow.js; each decision is kept in intake_decisions.
 
-import { all, get, ph, tx } from '../db.js';
+import { get, tx } from '../db.js';
 import { insert, update, mustGet } from '../repo.js';
 import { assertCan } from '../auth.js';
 import { testFeasibility } from '../intake-feasibility.js';
 import { HttpError, bad, guard, flags, locks, queued } from '../http.js';
-import { INTAKE_PENDING, INTAKE_HOLD, INTAKE_ACCEPTED } from '../lookups.js';
+import { INTAKE_PENDING, INTAKE_HOLD, INTAKE_ACCEPTED, DECISION_ACCEPTED, DECISION_HELD, DECISION_RELEASED, DECISION_REJECTED } from '../lookups.js';
 import { idList, nowIso, today } from '../util.js';
-import { SAMPLE_QUEUES, SAMPLE_RULES, cancelSampleAndTests } from '../workflow.js';
-import { reviewValues } from '../intake-values.js';
+import { SAMPLE_QUEUES, SAMPLE_RULES, SAMPLE_SELECT, cancelSampleAndTests } from '../workflow.js';
+import { reviewValues, submissionsOf } from '../intake-values.js';
 import { longDate, postMessage } from './portal.js';
 
 /**
@@ -29,15 +29,15 @@ function decide(ctx, s, decision, { intake, summary, reason = null, also }) {
  * Posts nothing for a Sample that did not come in with a Submission. The intake permission is the gate, not `portal.respond`.
  */
 export function tellClient(ctx, sample, body) {
-  const thread = get(`SELECT t.id FROM portal_threads t JOIN portal_submissions su ON su.id = t.submission_id, json_each(su.sample_ids) j
-    WHERE su.sample_ids IS NOT NULL AND j.value = ?`, sample.id);
+  const submission = submissionsOf([sample.id]).get(sample.id);
+  const thread = submission && get('SELECT id FROM portal_threads WHERE submission_id = ?', submission.id);
   if (thread) postMessage(thread.id, { user: ctx.user, body });
 }
 
 export function acceptSample(ctx, sampleId) {
   const s = mustGet('SELECT * FROM samples WHERE id = ?', sampleId, 'Sample');
   guard(SAMPLE_RULES.accept(s, ctx.user));
-  decide(ctx, s, 'Accepted', {
+  decide(ctx, s, DECISION_ACCEPTED, {
     intake: INTAKE_ACCEPTED,
     summary: 'Sample accepted at intake review',
     also: () => tellClient(ctx, s, `${s.code} has been accepted and will be tested. Expected completion ${longDate(s.due_date)}.`),
@@ -52,7 +52,7 @@ export function holdSample(ctx, sampleId, rawReason) {
   const reason = String(rawReason ?? '').trim();
   if (!reason) throw bad('Give a reason for holding this sample — it is sent to the client as a question', 'REASON_REQUIRED');
   tx(() => {
-    decide(ctx, s, 'Held', { intake: INTAKE_HOLD, summary: 'Sample put on hold at intake review', reason });
+    decide(ctx, s, DECISION_HELD, { intake: INTAKE_HOLD, summary: 'Sample put on hold at intake review', reason });
     tellClient(ctx, s, `Question about ${s.code}, which is on hold until we hear from you: ${reason}`);
   });
   return { ok: true };
@@ -61,7 +61,7 @@ export function holdSample(ctx, sampleId, rawReason) {
 export function releaseSample(ctx, sampleId) {
   const s = mustGet('SELECT * FROM samples WHERE id = ?', sampleId, 'Sample');
   guard(SAMPLE_RULES.release(s, ctx.user));
-  decide(ctx, s, 'Released', { intake: INTAKE_PENDING, summary: 'Sample released from hold at intake review' });
+  decide(ctx, s, DECISION_RELEASED, { intake: INTAKE_PENDING, summary: 'Sample released from hold at intake review' });
   return { ok: true };
 }
 
@@ -71,7 +71,7 @@ export function rejectSample(ctx, sampleId, body) {
   guard(SAMPLE_RULES.reject(s, ctx.user));
   const reason = String(body.reason || '').trim();
   if (!reason) throw bad('A reason is required to reject a sample', 'REASON_REQUIRED');
-  decide(ctx, s, 'Rejected', {
+  decide(ctx, s, DECISION_REJECTED, {
     summary: 'Sample rejected at intake review',
     reason,
     also: () => {
@@ -99,30 +99,19 @@ export function acceptSamples(ctx, ids) {
   return { results, accepted, refused: results.length - accepted };
 }
 
-// ---------------------------------------------------------------------------------------------
 // Receiving & Review
-// ---------------------------------------------------------------------------------------------
 
-// The rules the screen offers on a Sample, each with its refusal message for the screen to show beside a disabled action.
-// A later ticket adds its rule's name here and its button to ACTIONS in public/js/views/intake.js.
+// The rules whose refusal message the screen shows beside a disabled action.
 const SCREEN_ACTIONS = ['accept', 'hold', 'release', 'reject', 'assign'];
 
-// Each tab is a stage of intake: the Queue it reads and the intake state its Samples are at.
 const TABS = {
   pending: { queue: SAMPLE_QUEUES.intake, intake: INTAKE_PENDING },
   hold: { queue: SAMPLE_QUEUES.intake, intake: INTAKE_HOLD },
   ready: { queue: SAMPLE_QUEUES.ready, intake: INTAKE_ACCEPTED },
 };
 
-/** The Submission each of Samples `ids` arrived in, as { id, code, status, received_at } by Sample id. */
-function submissionsOf(ids) {
-  if (!ids.length) return new Map();
-  const rows = all(`SELECT j.value AS sample_id, su.id, su.code, su.status, su.received_at
-    FROM portal_submissions su, json_each(su.sample_ids) j WHERE su.sample_ids IS NOT NULL AND j.value IN (${ph(ids)})`, ...ids);
-  return new Map(rows.map(({ sample_id, ...submission }) => [sample_id, submission]));
-}
+const summary = ({ id, code, status, received_at }) => ({ id, code, status, received_at });
 
-/** Whether Sample `s` passes the screen's filters `q` (client, Project, priority, overdue, search). */
 function matches(s, q) {
   if (q.client_id && s.client_id !== +q.client_id) return false;
   if (q.project_id && s.project_id !== +q.project_id) return false;
@@ -133,9 +122,7 @@ function matches(s, q) {
 }
 
 export default function routes(r) {
-  // The Receiving & Review Queue for `?tab=pending|hold|ready`, grouped by Submission in the Queue's order. The tab
-  // counts follow the filters. A Queue lists only what the signed-in person is offered, so a person without
-  // `samples.review` gets no groups; `can` and `locks` are the rules' answer for each Sample, for the screen to show.
+  // The tab counts follow the filters. A person without `samples.review` is offered nothing, so gets no groups.
   r.get('/api/intake', (ctx) => {
     const tab = ctx.query.tab || 'pending';
     if (!Object.hasOwn(TABS, tab)) throw bad(`Tab must be one of: ${Object.keys(TABS).join(', ')}`);
@@ -144,7 +131,7 @@ export default function routes(r) {
     const submissions = submissionsOf(rows[tab].map((s) => s.id));
     const groups = new Map();
     for (const s of rows[tab]) {
-      const submission = submissions.get(s.id) ?? null;
+      const submission = submissions.get(s.id) ? summary(submissions.get(s.id)) : null;
       const key = submission ? `s${submission.id}` : 'direct';
       if (!groups.has(key)) groups.set(key, { submission, samples: [] });
       groups.get(key).samples.push({ ...s, can: flags(SAMPLE_RULES, s, ctx.user), locks: locks(SAMPLE_RULES, s, ctx.user, ...SCREEN_ACTIONS) });
@@ -152,11 +139,10 @@ export default function routes(r) {
     return { tab, counts: Object.fromEntries(Object.keys(TABS).map((name) => [name, rows[name].length])), groups: [...groups.values()] };
   });
 
-  // What the review pane shows for one Sample, one key per section, each computed in its own module: `tests` (the
-  // feasibility indicators of each open Test) and the values keys of `reviewValues`.
+  // One key per section of the review pane, each computed in its own module.
   r.get('/api/intake/samples/:id/review', (ctx) => {
     assertCan(ctx, 'samples.review');
-    const s = mustGet('SELECT * FROM samples WHERE id = ?', +ctx.params.id, 'Sample');
+    const s = mustGet(`${SAMPLE_SELECT} WHERE s.id = ?`, +ctx.params.id, 'Sample');
     return { ...reviewValues(s, ctx.user), tests: testFeasibility(s) };
   });
 
