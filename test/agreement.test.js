@@ -317,6 +317,7 @@ const SAMPLE_STATES = {
 const SAMPLE_ACTIONS = {
   assign: async (c, s) => c.post('/api/tests/assign', { test_ids: (await c.ok('GET', `/api/samples/${s}`)).tests.filter((t) => !t.analyst_id).map((t) => t.id), analyst_id: lab.users[ANALYST] }),
   accept: (c, s) => c.post(`/api/samples/${s}/accept`),
+  reject: (c, s) => c.post(`/api/samples/${s}/reject`, { reason: 'Vial arrived cracked' }),
   issue: (c, s) => c.post(`/api/samples/${s}/report`, { password: PASSWORD }),
   cancel: (c, s) => c.post(`/api/samples/${s}/cancel`, { reason: 'Client withdrew the batch' }),
   dispose: (c, s) => c.post(`/api/samples/${s}/custody`, { action: 'Disposed', note: 'Retention period over' }),
