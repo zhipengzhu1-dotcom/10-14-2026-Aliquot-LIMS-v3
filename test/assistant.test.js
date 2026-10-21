@@ -489,9 +489,10 @@ test('at most two calls reach Claude at once; the rest wait their turn', async (
   fake([{ delay_ms: 400, ...answer({ samples: [row('L-1')] }) }]);
   const turns = await Promise.all([1, 2, 3, 4].map(() => laura.req('POST', '/api/portal/assistant', { message: 'One lot' })));
   assert.deepEqual(turns.map((t) => t.status), [200, 200, 200, 200]);
-  const spans = prompts();
-  const overlap = Math.max(...spans.map((a) => spans.filter((b) => b.start < a.end && a.start < b.end).length));
-  assert.equal(overlap, 2);
+  // Count the calls running at each moment: two calls that each overlap a third may never have overlapped each other.
+  const edges = prompts().flatMap((c) => [[c.start, 1], [c.end, -1]]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  let running = 0;
+  assert.equal(Math.max(...edges.map(([, step]) => (running += step))), 2);
 });
 
 test('a call past the timeout is stopped, killed if it ignores that, refused as unavailable, and frees its place', async () => {
