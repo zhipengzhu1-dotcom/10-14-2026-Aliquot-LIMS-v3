@@ -23,6 +23,7 @@ import * as clients from './views/clients.js';
 import * as projects from './views/projects.js';
 import * as invoices from './views/invoices.js';
 import * as insights from './views/insights.js';
+import * as intake from './views/intake.js';
 import * as portalInbox from './views/portal-inbox.js';
 import * as team from './views/team.js';
 import * as workload from './views/workload.js';
@@ -36,6 +37,7 @@ const ROUTES = [
   ['/', dashboard.render, 'dashboard'],
   ['/samples', samples.list, 'samples'],
   ['/samples/receive', samples.receive, 'samples'],
+  ['/samples/review', intake.render, 'intake'],
   ['/samples/:id', samples.detail, 'samples'],
   ['/worklist', tests.worklist, 'worklist'],
   ['/tests/:id', tests.detail, 'worklist'],
@@ -84,6 +86,7 @@ const NAV = [
   ] },
   { group: 'Laboratory', items: [
     { key: 'samples', href: '/samples', label: 'Samples', icon: 'tube' },
+    { key: 'intake', href: '/samples/review', label: 'Receiving & Review', icon: 'inbox', badge: 'intake', hot: true, perm: ['samples.review'] },
     { key: 'worklist', href: '/worklist', label: 'Worklist', icon: 'worklist', badge: 'myTests', perm: ['tests.perform', 'tests.assign', 'work.oversee'] },
     { key: 'reviews', href: '/reviews', label: 'Reviews & approvals', icon: 'review', badge: 'reviews', hot: true, perm: ['tests.review', 'tests.approve', 'notebook.witness', 'reports.issue', 'work.oversee'] },
     { key: 'notebook', href: '/notebook', label: 'Lab notebook', icon: 'book' },

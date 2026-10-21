@@ -44,6 +44,10 @@ export function acceptSamples(ctx, ids) {
 // Receiving & Review
 // ---------------------------------------------------------------------------------------------
 
+// The rules the screen offers on a Sample, each with its refusal message for the screen to show beside a disabled action.
+// A later ticket adds its rule's name here and its button to ACTIONS in public/js/views/intake.js.
+const SCREEN_ACTIONS = ['accept'];
+
 // Each tab is a stage of intake: the Queue it reads and the intake state its Samples are at.
 const TABS = {
   pending: { queue: SAMPLE_QUEUES.intake, intake: INTAKE_PENDING },
@@ -84,7 +88,7 @@ export default function routes(r) {
       const submission = submissions.get(s.id) ?? null;
       const key = submission ? `s${submission.id}` : 'direct';
       if (!groups.has(key)) groups.set(key, { submission, samples: [] });
-      groups.get(key).samples.push({ ...s, can: flags(SAMPLE_RULES, s, ctx.user), locks: locks(SAMPLE_RULES, s, ctx.user, 'accept') });
+      groups.get(key).samples.push({ ...s, can: flags(SAMPLE_RULES, s, ctx.user), locks: locks(SAMPLE_RULES, s, ctx.user, ...SCREEN_ACTIONS) });
     }
     return { tab, counts: Object.fromEntries(Object.keys(TABS).map((name) => [name, rows[name].length])), groups: [...groups.values()] };
   });
