@@ -39,7 +39,7 @@ git fetch origin
 git worktree add --detach ~/Desktop/Claude/10.\ October\ 2026/aliquot-ci-runner origin/main
 ```
 
-To update it, stop the runners, move the worktree to the latest `main`, and start them again. Run the script from the worktree's top folder, because `status` and `start` find the repo a slot serves from the folder it runs in.
+To update it, stop the runners, move the worktree to the latest `main`, and start them again:
 
 ```sh
 cd ~/Desktop/Claude/10.\ October\ 2026/aliquot-ci-runner
@@ -56,7 +56,7 @@ Run this in the runner worktree:
 scripts/animated-runner.sh start
 ```
 
-Each slot registers its runner and starts its container. `start` then waits up to 90 seconds for a runner to come online on the repo. If none does, it exits 1 and points at the slot logs and Docker Desktop. The slots keep running after you close the terminal. They stop when the Mac restarts, so run `start` again after a restart. `start` refuses while the slots are still running, because a second loop would remove the first loop's container mid-job. The refusal names the folder the slots run from and the repo they serve, so run `stop` in that folder. While Docker Desktop is stopped, each slot waits and registers no runner.
+Each slot registers its runner and starts its container. `start` then waits up to 90 seconds for a runner to come online on the repo. If none does, it exits 1 and points at the slot logs and Docker Desktop. The slots keep running after you close the terminal. They stop when the Mac restarts, so run `start` again after a restart. `start` refuses while the slots are still running, because a second loop would remove the first loop's container mid-job. The refusal names the script the slots run and the repo it serves, with the `stop` command to run. While Docker Desktop is stopped, each slot waits and registers no runner.
 
 Each slot runs under `caffeinate -i`, which holds off idle sleep while the slots run, on battery as well as on power. A sleeping Mac freezes the Docker VM and the runner inside it, and GitHub fails the job 10 minutes after the runner's last heartbeat. A closed lid, Sleep in the Apple menu and a flat battery still sleep the Mac, so run `stop` before any of them. `stop` also releases the hold.
 
@@ -68,7 +68,7 @@ scripts/animated-runner.sh status
 
 It prints one line for each runner registered to the repo, with its name, `online` or `offline`, and whether it is running a job. Then it says whether the slots keep the Mac awake. It exits 1 when no slot runs under `caffeinate`, for example when the slots are stopped. It also exits 1 in two other cases:
 
-- A slot runs from a folder whose script serves another repo, such as the live copy. The message names the folder and that repo. Run `stop` in that folder, then `start` in the runner worktree.
+- A slot runs a script that serves another repo, such as the live copy's. The message names that script and its repo, with the `stop` command to run. Then run `start` in the runner worktree.
 - The slots run but no `animated-runner-*` runner is online on the repo. Each runner deregisters after its job and the next pass registers a new one, so `status` checks again for up to 30 seconds before it fails.
 
 Each slot's log is in `~/Library/Logs/animated-runner/<slot>.log`, and `docker ps --filter name=animated-runner-` shows the containers.

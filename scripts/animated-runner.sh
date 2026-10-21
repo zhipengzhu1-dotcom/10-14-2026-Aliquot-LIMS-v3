@@ -9,12 +9,15 @@ IMAGE=ghcr.io/actions/actions-runner:2.337.0@sha256:f5a0d9a3d857315f2aed7075a02a
 SLOTS=(1 2)
 LOGS="$HOME/Library/Logs/animated-runner"
 
-# One line per running slot process: its pid, the folder it runs from, and the REPO of the script in that folder.
+# One line per running slot process: its pid, the script it runs, and that script's REPO.
 slots() {
-  local pid dir
+  local pid script
   for pid in $(pgrep -f 'animated-runner\.sh slot' || true); do
-    dir=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p') || continue
-    [[ -z $dir ]] || printf '%s\t%s\t%s\n' "$pid" "$dir" "$(sed -n 's/^REPO=//p' "$dir/scripts/animated-runner.sh" 2>/dev/null)"
+    script=$(ps -o args= -p "$pid" | sed -nE 's/^(caffeinate -i )?([^ ]*bash )?(.*animated-runner\.sh) slot [0-9]+$/\3/p')
+    [[ -n $script ]] || continue
+    # start launches the slots as "$0", so a relative path is relative to the folder start ran in.
+    [[ $script == /* ]] || script="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')/$script"
+    printf '%s\t%s\t%s\n' "$pid" "$script" "$(sed -n 's/^REPO=//p' "$script" 2>/dev/null)"
   done
 }
 
@@ -43,10 +46,9 @@ case "${1:-}" in
     ;;
   start)
     # A second loop for a slot would remove the first loop's container mid-job.
-    running=$(slots | cut -f2,3 | sort -u)
-    if [[ -n $running ]]; then
-      echo "The slots are already running. Run stop in the folder they run from first." >&2
-      awk -F'\t' '{ print "  " $1 " (" ($2 == "" ? "no REPO line" : $2) ")" }' <<<"$running" >&2
+    if pgrep -f 'animated-runner\.sh slot' >/dev/null; then
+      echo "The slots are already running. Stop them first with the script that runs them:" >&2
+      slots | cut -f2,3 | sort -u | awk -F'\t' '{ print "  \"" $1 "\" stop   (serves " ($2 == "" ? "no repo" : $2) ")" }' >&2
       exit 1
     fi
     mkdir -p "$LOGS"
@@ -68,8 +70,8 @@ case "${1:-}" in
     else echo "No slot keeps the Mac awake. Run stop, then start." >&2; exit 1; fi
     wrong=$(slots | awk -F'\t' -v repo="$REPO" '$3 != repo' | cut -f2,3 | sort -u)
     if [[ -n $wrong ]]; then
-      while IFS=$'\t' read -r dir repo; do
-        echo "The slots in $dir run for ${repo:-no repo}, not $REPO. Run scripts/animated-runner.sh stop in that folder, then start from a checkout of $REPO main." >&2
+      while IFS=$'\t' read -r script repo; do
+        echo "The slots run $script, which serves ${repo:-no repo}, not $REPO. Run \"$script\" stop, then start from the runner worktree (docs/ci-runner.md)." >&2
       done <<<"$wrong"
       exit 1
     fi
