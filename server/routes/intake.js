@@ -3,6 +3,8 @@
 
 import { all, get, ph, tx } from '../db.js';
 import { insert, update, mustGet } from '../repo.js';
+import { assertCan } from '../auth.js';
+import { testFeasibility } from '../intake-feasibility.js';
 import { HttpError, bad, guard, flags, locks, queued } from '../http.js';
 import { INTAKE_PENDING, INTAKE_HOLD, INTAKE_ACCEPTED } from '../lookups.js';
 import { idList, nowIso, today } from '../util.js';
@@ -123,6 +125,13 @@ export default function routes(r) {
       groups.get(key).samples.push({ ...s, can: flags(SAMPLE_RULES, s, ctx.user), locks: locks(SAMPLE_RULES, s, ctx.user, ...SCREEN_ACTIONS) });
     }
     return { tab, counts: Object.fromEntries(Object.keys(TABS).map((name) => [name, rows[name].length])), groups: [...groups.values()] };
+  });
+
+  // What the review pane shows for one Sample. `tests`: each open Test with its Method and the feasibility indicators.
+  r.get('/api/intake/samples/:id/review', (ctx) => {
+    assertCan(ctx, 'samples.review');
+    const s = mustGet('SELECT * FROM samples WHERE id = ?', +ctx.params.id, 'Sample');
+    return { tests: testFeasibility(s) };
   });
 
   r.post('/api/samples/accept', (ctx) => acceptSamples(ctx, idList(ctx.body.sample_ids)));
