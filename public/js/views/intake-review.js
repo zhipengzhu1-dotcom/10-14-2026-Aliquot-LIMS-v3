@@ -1,0 +1,43 @@
+// The review pane of one received Sample, opened from the Receiving & Review screen. The pane is only a shell: each
+// section of `SECTIONS` renders from the review the server returns (GET /api/intake/samples/:id/review) and wires its
+// own actions; `reload` redraws every section after one of them changes the Sample.
+import { html } from '../core/html.js';
+import { api } from '../core/api.js';
+import { openModal, showError } from '../core/ui.js';
+import { section as values, intakeBadge } from './intake-values.js';
+
+// One entry per section, in the order shown: { key, render(review), wire(root, review, { reload }) }.
+const SECTIONS = [values];
+
+/** Opens the review of Sample `sampleId`; `onChange` runs after a correction so the screen behind can reload. */
+export async function openReview(sampleId, { onChange } = {}) {
+  let review;
+  try {
+    review = await api.get(`/api/intake/samples/${sampleId}/review`);
+  } catch (e) {
+    showError(e);
+    return null;
+  }
+  const modal = openModal({
+    title: html`<span class="mono" data-review-title></span>`,
+    size: 'xl',
+    cls: 'intake-review',
+    body: html`<div class="stack" data-review-body></div>`,
+  });
+  const root = modal.el.querySelector('[data-review-body]');
+
+  function draw() {
+    modal.el.querySelector('[data-review-title]').innerHTML = String(html`${review.sample.code} ${intakeBadge(review.sample.intake)}`);
+    root.innerHTML = String(html`${SECTIONS.map((s) => s.render(review))}`);
+    for (const s of SECTIONS) s.wire(root, review, { reload });
+  }
+
+  async function reload() {
+    review = await api.get(`/api/intake/samples/${sampleId}/review`);
+    draw();
+    onChange?.();
+  }
+
+  draw();
+  return modal;
+}
