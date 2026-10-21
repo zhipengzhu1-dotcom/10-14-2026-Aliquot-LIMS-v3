@@ -204,7 +204,7 @@ Built in:
 - `npm run check` syntax-checks every JavaScript file.
 - `npm test` runs the end-to-end tests: it starts a server on a temporary database and walks the full workflow, including every control that must refuse.
 - **Upgrade test:** `test/upgrade.test.js` starts the current code against a database from an earlier release (in a throwaway copy) and checks that migrations apply, no records are lost and the audit chain still verifies. It runs every `test/fixtures/*.db`. Before a release, also run it against a recent backup: `UPGRADE_FROM=path/to/backup npm run test:upgrade` (a `.db` file, or a backup folder with `aliquot.db` and `files/`). On Windows use `set UPGRADE_FROM=...` first.
-- **CI:** every push to `main` and every pull request runs `npm run check` and `npm test` on Linux with Node 22.13 and 24, on runners in Docker on the owner's Mac (`.github/workflows/ci.yml`, `docs/ci-runner.md`). Windows and macOS are not covered.
+- **CI:** every push to `main` and every pull request runs `npm run check` and `npm test` on Linux with Node 22.13 and 24, on runners in Docker on the owner's Mac (`.github/workflows/ci.yml`, `docs/ci-runner.md`). Windows and macOS are not covered. `npm run ci:watch -- <pr> --merge` merges a pull request once its CI passes and diagnoses CI that is stuck or looping.
 - **Schema changes:** add a new entry to `MIGRATIONS` in `server/schema.js`. Never edit one that has already run.
 
 ### Ideas for next steps
