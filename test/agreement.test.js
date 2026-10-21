@@ -106,16 +106,19 @@ async function readyResults(t) {
   return { instrument_id: d.instruments.find((i) => i.code === 'KF-01').id, results: d.results.map((r) => ({ id: r.id, value: '0.21' })) };
 }
 
-async function receiveSample() {
-  const res = await (await as('priya.raman')).ok('POST', '/api/samples/receive', { client_id: lab.client, samples: [{ description: 'Agreement sweep' }], method_ids: [lab.kf] });
+/** A received Sample, accepted at intake review unless `pendingReview` leaves it waiting there. */
+async function receiveSample({ pendingReview = false } = {}) {
+  const priya = await as('priya.raman');
+  const res = await priya.ok('POST', '/api/samples/receive', { client_id: lab.client, samples: [{ description: 'Agreement sweep' }], method_ids: [lab.kf] });
+  if (!pendingReview) await priya.ok('POST', `/api/samples/${res.samples[0].id}/accept`);
   return res.samples[0].id;
 }
 
-/** A Karl Fischer Test taken through `steps`, on a new Sample or added to `sampleId`. */
-async function prepareTest(steps, sampleId) {
+/** A Karl Fischer Test taken through `steps`, on a new Sample (left Pending review if asked) or added to `sampleId`. */
+async function prepareTest(steps, sampleId, { pendingReview = false } = {}) {
   const priya = await as('priya.raman');
   if (sampleId) await priya.ok('POST', `/api/samples/${sampleId}/tests`, { method_ids: [lab.kf] });
-  else sampleId = await receiveSample();
+  else sampleId = await receiveSample({ pendingReview });
   const tests = (await priya.ok('GET', `/api/samples/${sampleId}`)).tests;
   const t = { sampleId, testId: tests.at(-1).id };
   for (const step of steps) await STEPS[step](t);
@@ -299,6 +302,7 @@ for (const [state, steps] of Object.entries(TEST_STATES)) {
 
 // Each state builds a Sample from Tests prepared as above, then optionally does something to the Sample itself.
 const SAMPLE_STATES = {
+  'Pending review': { tests: [[]], pendingReview: true },
   'with a Test nobody is assigned to': { tests: [[]] },
   'with every Test approved': { tests: [PERFORMED] },
   'with an open Test beside an approved one': { tests: [PERFORMED, ['assign', 'enter']] },
@@ -312,6 +316,7 @@ const SAMPLE_STATES = {
 
 const SAMPLE_ACTIONS = {
   assign: async (c, s) => c.post('/api/tests/assign', { test_ids: (await c.ok('GET', `/api/samples/${s}`)).tests.filter((t) => !t.analyst_id).map((t) => t.id), analyst_id: lab.users[ANALYST] }),
+  accept: (c, s) => c.post(`/api/samples/${s}/accept`),
   issue: (c, s) => c.post(`/api/samples/${s}/report`, { password: PASSWORD }),
   cancel: (c, s) => c.post(`/api/samples/${s}/cancel`, { reason: 'Client withdrew the batch' }),
   dispose: (c, s) => c.post(`/api/samples/${s}/custody`, { action: 'Disposed', note: 'Retention period over' }),
@@ -323,9 +328,9 @@ const SAMPLE_ACTIONS = {
 
 const SAMPLE_PEOPLE = ['priya.raman', 'daniel.okafor', 'admin', ANALYST];
 
-async function prepareSample({ tests, then }) {
+async function prepareSample({ tests, then, pendingReview }) {
   let sampleId;
-  for (const steps of tests) sampleId = (await prepareTest(steps, sampleId)).sampleId;
+  for (const steps of tests) sampleId = (await prepareTest(steps, sampleId, { pendingReview })).sampleId;
   if (then) await then(await as('priya.raman'), sampleId);
   return sampleId;
 }

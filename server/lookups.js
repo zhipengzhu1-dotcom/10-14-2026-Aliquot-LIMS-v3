@@ -16,6 +16,8 @@ export const PERMISSIONS = {
   'samples.edit': ['admin', 'manager', 'scientist', 'analyst'],
   'samples.dispose': ['admin', 'manager', 'qa'],
   'tests.assign': ['manager', 'scientist'],
+  // Intake review: deciding whether a received Sample is accepted before its Tests are assigned.
+  'samples.review': ['manager', 'scientist'],
   'tests.perform': ['manager', 'scientist', 'analyst'],
   'tests.review': ['manager', 'scientist', 'qa'],
   'tests.approve': ['manager', 'qa'],
@@ -101,6 +103,10 @@ export const priorityRank = (column) => `CASE ${column} ${Object.entries(PRIORIT
 export const STAGES = ['Stability', 'R&D', 'Finished product', 'Initial', 'Bulk hold', 'Other'];
 export const RECEIPT_CONDITIONS = ['Acceptable', 'Damaged container', 'Temperature excursion', 'Insufficient quantity', 'Labelling discrepancy'];
 export const SAMPLE_STATUSES = ['Received', 'In Testing', 'In Review', 'Approved', 'Reported', 'Cancelled', 'Disposed'];
+/** Intake review: where a received Sample stands before its Tests may be assigned. Separate from its derived status. */
+export const INTAKE_PENDING = 'Pending review';
+export const INTAKE_HOLD = 'On hold';
+export const INTAKE_ACCEPTED = 'Accepted';
 export const SAMPLE_OPEN = ['Received', 'In Testing', 'In Review', 'Approved'];
 export const CUSTODY_ACTIONS = ['Moved', 'Removed for testing', 'Returned to storage', 'Aliquoted', 'Returned to client', 'Disposed'];
 

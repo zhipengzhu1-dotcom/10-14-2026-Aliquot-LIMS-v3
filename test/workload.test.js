@@ -76,6 +76,7 @@ async function receive(projectId, dueDate) {
     client_id: lab.acme.id, project_id: projectId, due_date: dueDate, sample_type: 'Drug Product', storage: 'Ambient (15–25 °C)', priority: 'One week',
     samples: [{ description: 'Workload sample' }], method_ids: [lab.hplc.id],
   });
+  await lab.priya.ok('POST', `/api/samples/${samples[0].id}/accept`);
   return (await lab.priya.ok('GET', `/api/samples/${samples[0].id}`)).tests[0].id;
 }
 

@@ -8,7 +8,7 @@ import { HttpError, bad, guard, flags, queued, workQueue } from '../http.js';
 import { assertCan } from '../auth.js';
 import { getNumber, labSettings } from '../settings.js';
 import {
-  SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, CUSTODY_ACTIONS, METHOD_USABLE, SAMPLE_OPEN, priorityRank, rolesWith,
+  SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, CUSTODY_ACTIONS, METHOD_USABLE, SAMPLE_OPEN, INTAKE_PENDING, priorityRank, rolesWith,
 } from '../lookups.js';
 import { clean, cleanAll, nowIso, today, addBusinessDays, dateOf, idList, likeTerm, limitParam, round } from '../util.js';
 import {
@@ -165,7 +165,7 @@ export function receiveSamples(ctx, body, { legacyTiers = false } = {}) {
     const code = nextCode('S');
     const due = dueFor(row.priority);
     const id = insert(ctx, 'samples', {
-      code, ...common, ...row, due_date: due, status: 'Received', received_by: ctx.user.id, created_at: nowIso(),
+      code, ...common, ...row, due_date: due, status: 'Received', intake: INTAKE_PENDING, received_by: ctx.user.id, created_at: nowIso(),
     }, { summary: 'Sample received' });
     if (details.length) insert(ctx, 'sample_details', { sample_id: id, details: JSON.stringify(details), created_at: nowIso() }, { code, summary: 'Client sheet details kept' });
     run(

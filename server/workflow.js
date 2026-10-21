@@ -10,7 +10,7 @@ import { all, get, run, ph, tx } from './db.js';
 import { update, mustGet } from './repo.js';
 import { bad, forbidden, guard } from './http.js';
 import { can, verifySignature, applySignature } from './auth.js';
-import { SAMPLE_OPEN, SIGNATURE_MEANINGS, priorityRank } from './lookups.js';
+import { SAMPLE_OPEN, SIGNATURE_MEANINGS, INTAKE_ACCEPTED, priorityRank } from './lookups.js';
 import { clean, nowIso, today, idList, round, sameValue, fixed, specText } from './util.js';
 import { openSampleInvestigation, openTestInvestigation, raiseInvestigation } from './investigations.js';
 
@@ -36,7 +36,7 @@ export const SAMPLE_SELECT = `
   LEFT JOIN users u ON u.id = s.received_by`;
 
 export const TEST_SELECT = `
-  SELECT t.*, s.code AS sample_code, s.description AS sample_description, s.batch_no, s.priority, s.client_id, s.project_id,
+  SELECT t.*, s.code AS sample_code, s.description AS sample_description, s.batch_no, s.priority, s.client_id, s.project_id, s.intake AS sample_intake,
     c.code AS client_code, c.name AS client_name,
     m.code AS method_code, m.version AS method_version, m.title AS method_title, m.technique,
     a.full_name AS analyst_name, a.initials AS analyst_initials,
@@ -105,13 +105,20 @@ function approvalRule(t, me) {
   if (t.reviewed_by === me.id) return forbidden('You reviewed this test — approval must come from a different person');
 }
 
+/** Refuses work on a Test whose Sample intake review has not accepted. */
+const intakeGate = (t) => (t.sample_intake === INTAKE_ACCEPTED ? undefined : bad(`${t.sample_code} has not been accepted at intake review yet — accept it before its tests are assigned or picked up`));
+
 export const TEST_RULES = {
   assign(t, me) {
     if (!can(me, 'tests.assign')) return forbidden();
+    const unaccepted = intakeGate(t);
+    if (unaccepted) return unaccepted;
     if (!TEST_EDITABLE.includes(t.status)) return bad(`${t.code} is ${t.status.toLowerCase()} and can't be reassigned`);
   },
   claim(t, me) {
     if (!can(me, 'tests.perform')) return forbidden();
+    const unaccepted = intakeGate(t);
+    if (unaccepted) return unaccepted;
     if (t.analyst_id) return bad(`${t.code} is already assigned to ${t.analyst_name}`);
     if (t.status !== 'Pending') return bad('Only pending tests can be picked up');
     if (!isQualified(me.id, t.method_code)) return forbidden(`You are not qualified on ${t.method_code}`);
@@ -173,6 +180,7 @@ export const unassignedTests = (sampleId, me) => sampleTests(sampleId).filter((t
 export const SAMPLE_RULES = {
   assign(s, me) {
     if (!can(me, 'tests.assign')) return forbidden();
+    if (s.intake !== INTAKE_ACCEPTED) return bad('This sample has not been accepted at intake review yet — accept it before its tests are assigned');
     if (!unassignedTests(s.id, me).length) return bad('Every test on this sample is already assigned');
   },
   issue(s, me) {
@@ -218,6 +226,13 @@ export const SAMPLE_RULES = {
   attach(s, me) {
     if (!can(me, 'samples.edit')) return forbidden();
     if (!SAMPLE_OPEN.includes(s.status)) return bad(`The sample is ${s.status.toLowerCase()} — attachments are locked`);
+  },
+
+  // Intake review: the decision that releases a received Sample's Tests for assignment.
+  accept(s, me) {
+    if (!can(me, 'samples.review')) return forbidden();
+    if (s.intake === INTAKE_ACCEPTED) return bad('This sample is already accepted');
+    if (!SAMPLE_OPEN.includes(s.status)) return bad(`Sample is ${s.status.toLowerCase()} and can't be accepted`);
   },
 };
 

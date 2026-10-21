@@ -9,6 +9,7 @@ import { setSettings, resetSettingsCache } from './settings.js';
 import { hashPassword } from './auth.js';
 import { setClock, localDate, today, initialsOf } from './util.js';
 import { receiveSamples } from './routes/lab.js';
+import { acceptSample } from './routes/intake.js';
 import { assignTests, startTest, saveResults, submitTest, reviewTest, approveTest, issueReport } from './workflow.js';
 import { createMethod, setMethodStatus, newMethodVersion, createInstrument, logInstrument, createInventory } from './routes/resources.js';
 import { createClient, createProject, setProjectStatus, createInvoice, setInvoiceStatus } from './routes/business.js';
@@ -464,7 +465,10 @@ export function seedDemo() {
       sample.id = res.samples[0].id;
       sample.code = res.samples[0].code;
       for (const t of all('SELECT t.id, m.code FROM tests t JOIN methods m ON m.id = t.method_id WHERE t.sample_id = ?', sample.id)) sample.tests[t.code] = t.id;
+      // Intake review follows receipt at once, except for the newest arrivals, which the demo leaves waiting for the manager.
+      if (!spec.pendingReview) acceptSample(as('priya.raman'), sample.id);
     }, sample);
+    if (spec.pendingReview) return sample;
 
     // Labs work faster on short-turnaround and rush work: scale the simulated pace to the due date.
     const tat = Math.max(...spec.methods.map((c) => M[c].def.tat_days));
@@ -701,6 +705,7 @@ export function seedDemo() {
       at: daysAgo < 1 ? t : work(t), client: 'ACME', project: 'release', type: 'Drug Product', storage: 'Ambient (15–25 °C)', location: 'Sample store A — shelf 2',
       description: batch.startsWith('MF10') ? 'Metformin HCl 1000 mg Film-coated Tablets' : 'Metformin HCl 500 mg Film-coated Tablets', batch, clientRef: `ACME-REL-${batch.slice(-4)}`,
       quantity: '2 × 100 tablets', container: 'HDPE bottle', methods: releaseMethods, priority: daysAgo < 1 ? '3 days' : 'One week',
+      pendingReview: daysAgo < 0.2,
     });
   });
   [[2.6, 'Hypromellose 2910 (5 cP)'], [1.1, 'Sodium Starch Glycolate']].forEach(([daysAgo, description], i) => {
