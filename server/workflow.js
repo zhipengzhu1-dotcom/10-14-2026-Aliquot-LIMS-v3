@@ -235,6 +235,18 @@ export const SAMPLE_RULES = {
     if (!SAMPLE_OPEN.includes(s.status)) return bad(`Sample is ${s.status.toLowerCase()} and can't be accepted`);
   },
 
+  // Intake review: setting a Sample aside while the client is asked a question, and taking it back up.
+  hold(s, me) {
+    if (!can(me, 'samples.review')) return forbidden();
+    if (s.intake === INTAKE_HOLD) return bad('This sample is already on hold');
+    if (s.intake !== INTAKE_PENDING) return bad('Only a sample waiting for intake review can be put on hold');
+    if (!SAMPLE_OPEN.includes(s.status)) return bad(`Sample is ${s.status.toLowerCase()} and can't be put on hold`);
+  },
+  release(s, me) {
+    if (!can(me, 'samples.review')) return forbidden();
+    if (s.intake !== INTAKE_HOLD) return bad('This sample is not on hold');
+  },
+
   // Intake review: turning a Sample away cancels it, so it is stricter than `cancel`, never a way around it. It needs
   // `samples.review` rather than `tests.cancel`, but only before any work has begun and while no Investigation is open.
   reject(s, me) {

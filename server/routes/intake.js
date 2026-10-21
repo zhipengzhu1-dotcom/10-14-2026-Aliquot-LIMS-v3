@@ -41,6 +41,26 @@ export function acceptSample(ctx, sampleId) {
   return { ok: true };
 }
 
+/** Puts a Pending review Sample on hold and asks the client `reason` in its Submission's thread, if it has one. */
+export function holdSample(ctx, sampleId, rawReason) {
+  const s = mustGet('SELECT * FROM samples WHERE id = ?', sampleId, 'Sample');
+  guard(SAMPLE_RULES.hold(s, ctx.user));
+  const reason = String(rawReason ?? '').trim();
+  if (!reason) throw bad('Give a reason for holding this sample — it is sent to the client as a question', 'REASON_REQUIRED');
+  tx(() => {
+    decide(ctx, s, 'Held', { intake: INTAKE_HOLD, summary: 'Sample put on hold at intake review', reason });
+    tellClient(ctx, s, `Question about ${s.code}, which is on hold until we hear from you: ${reason}`);
+  });
+  return { ok: true };
+}
+
+export function releaseSample(ctx, sampleId) {
+  const s = mustGet('SELECT * FROM samples WHERE id = ?', sampleId, 'Sample');
+  guard(SAMPLE_RULES.release(s, ctx.user));
+  decide(ctx, s, 'Released', { intake: INTAKE_PENDING, summary: 'Sample released from hold at intake review' });
+  return { ok: true };
+}
+
 /** Turns a Sample away: cancels it and its open Tests under the stricter `reject` rule, keeps the decision and tells the client why. */
 export function rejectSample(ctx, sampleId, body) {
   const s = mustGet('SELECT * FROM samples WHERE id = ?', sampleId, 'Sample');
@@ -81,7 +101,7 @@ export function acceptSamples(ctx, ids) {
 
 // The rules the screen offers on a Sample, each with its refusal message for the screen to show beside a disabled action.
 // A later ticket adds its rule's name here and its button to ACTIONS in public/js/views/intake.js.
-const SCREEN_ACTIONS = ['accept', 'reject'];
+const SCREEN_ACTIONS = ['accept', 'hold', 'release', 'reject'];
 
 // Each tab is a stage of intake: the Queue it reads and the intake state its Samples are at.
 const TABS = {
@@ -138,5 +158,7 @@ export default function routes(r) {
 
   r.post('/api/samples/accept', (ctx) => acceptSamples(ctx, idList(ctx.body.sample_ids)));
   r.post('/api/samples/:id/accept', (ctx) => acceptSample(ctx, +ctx.params.id));
+  r.post('/api/samples/:id/hold', (ctx) => holdSample(ctx, +ctx.params.id, ctx.body.reason));
+  r.post('/api/samples/:id/release', (ctx) => releaseSample(ctx, +ctx.params.id));
   r.post('/api/samples/:id/reject', (ctx) => rejectSample(ctx, +ctx.params.id, ctx.body));
 }
