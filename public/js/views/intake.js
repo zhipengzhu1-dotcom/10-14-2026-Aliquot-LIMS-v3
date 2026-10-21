@@ -6,6 +6,7 @@ import { api } from '../core/api.js';
 import { state, can } from '../core/state.js';
 import { icon } from '../core/icons.js';
 import { navigate, refreshNav, setQuery } from '../core/nav.js';
+import { askHoldReason } from './intake-hold.js';
 import {
   pageHead, segmented, searchBox, priorityBadge, dueChip, fmtDateTime, plural, emptyState, badge, toast, showError, busy, confirmDialog, debounce, promptReason,
 } from '../core/ui.js';
@@ -18,23 +19,33 @@ const TABS = [
   { key: 'ready', label: 'Ready to assign' },
 ];
 
+/** Asks why a Sample is rejected; resolves `{ reason }`, or null if dismissed. */
+const askRejectReason = async () => {
+  const reason = await promptReason('Why is this sample being rejected? It and its open tests are cancelled, and the client is told the reason');
+  return reason ? { reason } : null;
+};
+
 // The decisions the screen offers on one Sample. `key` is the rule's name: the button is enabled when `can[key]`, and
-// disabled with `locks[key]` beside it otherwise. `bulk` is set for the ones that also apply to a selection.
+// disabled with `locks[key]` beside it otherwise. `bulk` is set for the ones that also apply to a selection. `ask`, when
+// set, is shown before the action is posted: given `{ sample, submission }` it resolves the request body, or null to cancel.
+// `tabs`, when set, lists the only tabs the action is shown on (the rule still decides whether it is enabled).
 const ACTIONS = [
   { key: 'accept', label: 'Accept', icon: 'check', primary: true, bulk: { path: '/api/samples/accept', done: 'accepted' } },
-  // `ask` is the question put to the person before the decision is sent: the reason it is taken for.
-  { key: 'reject', label: 'Reject', icon: 'x', done: 'rejected', ask: 'Why is this sample being rejected? It and its open tests are cancelled, and the client is told the reason' },
+  { key: 'hold', label: 'Hold', icon: 'clock', ask: askHoldReason, done: 'put on hold', tabs: ['pending'] },
+  { key: 'release', label: 'Release', icon: 'undo', done: 'released', tabs: ['hold'] },
+  { key: 'reject', label: 'Reject', icon: 'x', done: 'rejected', ask: askRejectReason },
 ];
 
 const FILTERS = ['client', 'project', 'priority', 'overdue'];
 
-function actionButtons(s) {
-  return html`<span class="row nowrap" style="gap:6px">${ACTIONS.map((a) => html`
+function actionButtons(s, tab) {
+  const shown = ACTIONS.filter((a) => !a.tabs || a.tabs.includes(tab));
+  return html`<span class="row nowrap" style="gap:6px">${shown.map((a) => html`
     <button class="btn sm ${a.primary && s.can[a.key] ? 'primary' : ''}" data-act="${a.key}" data-id="${s.id}" data-code="${s.code}" ${s.can[a.key] ? '' : raw('disabled')} title="${s.locks[a.key] ?? ''}">${icon(a.icon, { size: 13 })}${a.label}</button>`)}</span>
-    ${ACTIONS.map((a) => (s.locks[a.key] ? html`<span class="sub-line" data-why="${a.key}">${s.locks[a.key]}</span>` : ''))}`;
+    ${shown.map((a) => (s.locks[a.key] ? html`<span class="sub-line" data-why="${a.key}">${s.locks[a.key]}</span>` : ''))}`;
 }
 
-function groupTable(group) {
+function groupTable(group, tab) {
   const pickable = (s) => ACTIONS.some((a) => a.bulk && s.can[a.key]);
   return html`<div class="table-wrap"><table class="table">
     <thead><tr><th class="sel">${group.samples.some(pickable) ? html`<input type="checkbox" data-all aria-label="Select every sample in this group">` : ''}</th><th>Sample</th><th>Client</th><th>Type</th><th>Tests</th><th>Priority</th><th>Due</th><th>Received</th><th>Decision</th></tr></thead>
@@ -49,11 +60,11 @@ function groupTable(group) {
       <td>${priorityBadge(s.priority) || s.priority}</td>
       <td>${dueChip(s.due_date)}</td>
       <td class="nowrap muted small">${fmtDateTime(s.received_at)}</td>
-      <td>${actionButtons(s)}</td>
+      <td>${actionButtons(s, tab)}</td>
     </tr>`)}</tbody></table></div>`;
 }
 
-function groupCard(group) {
+function groupCard(group, tab) {
   const sub = group.submission;
   const first = group.samples[0];
   return html`<section class="card" data-group="${sub ? sub.id : 'direct'}">
@@ -61,7 +72,7 @@ function groupCard(group) {
       <h2>${sub ? html`<a class="code" href="/portal-inbox/submissions/${sub.id}">${sub.code}</a> · ${first.client_name}` : 'Received at the front desk'}</h2>
       <p class="sub">${sub ? `Client Submission received ${fmtDateTime(sub.received_at)}` : 'Not part of a client Submission'} · ${plural(group.samples.length, 'sample')}</p>
     </div></header>
-    ${groupTable(group)}
+    ${groupTable(group, tab)}
   </section>`;
 }
 
@@ -138,7 +149,7 @@ export async function render(ctx) {
     host.innerHTML = String(html`
       ${bulk.length ? html`<div class="toolbar">${bulk.map((a) => html`<button class="btn ${a.primary ? 'primary' : ''}" data-bulk="${a.key}" disabled>${icon(a.icon, { size: 15 })}${a.label} selected</button>`)}
         <button class="btn" data-select-all>Select all shown</button></div>` : ''}
-      ${data.groups.map(groupCard)}`);
+      ${data.groups.map((g) => groupCard(g, tab))}`);
     wireList(host);
   }
 
@@ -164,14 +175,20 @@ export async function render(ctx) {
       sync();
     });
     host.querySelectorAll('[data-review]').forEach((b) => b.addEventListener('click', () => openReview(b.dataset.review, { title: `Review ${b.dataset.code}` })));
-    host.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => busy(b, async () => {
+    host.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', async () => {
       const a = ACTIONS.find((x) => x.key === b.dataset.act);
-      const reason = a.ask ? await promptReason(a.ask) : undefined;
-      if (a.ask && !reason) return;
-      await api.post(`/api/samples/${b.dataset.id}/${a.key}`, a.ask ? { reason } : undefined);
-      toast(`${b.dataset.code} ${a.done ?? a.bulk?.done ?? 'updated'}`);
-      await after();
-    })));
+      let body;
+      if (a.ask) {
+        const group = data.groups.find((g) => g.samples.some((s) => s.id === Number(b.dataset.id)));
+        body = await a.ask({ sample: group.samples.find((s) => s.id === Number(b.dataset.id)), submission: group.submission });
+        if (!body) return;
+      }
+      await busy(b, async () => {
+        await api.post(`/api/samples/${b.dataset.id}/${a.key}`, body);
+        toast(`${b.dataset.code} ${a.done ?? a.bulk?.done ?? 'updated'}`);
+        await after();
+      });
+    }));
     host.querySelectorAll('[data-bulk]').forEach((b) => b.addEventListener('click', async () => {
       const a = ACTIONS.find((x) => x.key === b.dataset.bulk);
       const ids = picked();
