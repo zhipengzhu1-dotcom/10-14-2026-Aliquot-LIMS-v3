@@ -100,7 +100,7 @@ export function acceptSamples(ctx, ids) {
 
 // The rules the screen offers on a Sample, each with its refusal message for the screen to show beside a disabled action.
 // A later ticket adds its rule's name here and its button to ACTIONS in public/js/views/intake.js.
-const SCREEN_ACTIONS = ['accept', 'hold', 'release', 'reject'];
+const SCREEN_ACTIONS = ['accept', 'hold', 'release', 'reject', 'assign'];
 
 // Each tab is a stage of intake: the Queue it reads and the intake state its Samples are at.
 const TABS = {

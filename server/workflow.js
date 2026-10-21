@@ -319,6 +319,16 @@ export function cancelSampleAndTests(ctx, s, reason) {
 // Test services
 // ---------------------------------------------------------------------------------------------
 
+/** Why Test `t` cannot go to `analyst` (null to unassign) beyond the assign rule: results already entered, or no current qualification. */
+export function assignBlocker(t, analyst) {
+  if (t.analyst_id && t.analyst_id !== analyst?.id && get('SELECT 1 FROM results WHERE test_id = ? AND entered_at IS NOT NULL', t.id)) {
+    return bad(`${t.code} already has results entered by ${t.analyst_name} — it can't be ${analyst ? 'reassigned' : 'unassigned'}`);
+  }
+  if (analyst && !isQualified(analyst.id, t.method_code)) {
+    return bad(`${analyst.full_name} is not qualified on ${t.method_code}. Record their training under Team → Training first.`);
+  }
+}
+
 export function assignTests(ctx, body) {
   const ids = idList(body.test_ids);
   if (!ids.length) throw bad('Select at least one test');
@@ -329,12 +339,8 @@ export function assignTests(ctx, body) {
   const due = body.due_date ? clean(body, { due_date: { type: 'date' } }).due_date : undefined;
   tx(() => {
     for (const t of tests) {
-      if (t.analyst_id && t.analyst_id !== analyst?.id && get('SELECT 1 FROM results WHERE test_id = ? AND entered_at IS NOT NULL', t.id)) {
-        throw bad(`${t.code} already has results entered by ${t.analyst_name} — it can't be ${analyst ? 'reassigned' : 'unassigned'}`);
-      }
-      if (analyst && !isQualified(analyst.id, t.method_code)) {
-        throw bad(`${analyst.full_name} is not qualified on ${t.method_code}. Record their training under Team → Training first.`);
-      }
+      const blocked = assignBlocker(t, analyst);
+      if (blocked) throw blocked;
       update(ctx, 'tests', t.id, { analyst_id: analyst?.id ?? null, due_date: due }, {
         summary: analyst ? `Assigned to ${analyst.full_name}` : 'Unassigned',
       });
