@@ -79,7 +79,7 @@ Each slot's log is in `~/Library/Logs/animated-runner/<slot>.log`, and `docker p
 scripts/animated-runner.sh stop
 ```
 
-It stops the slot loops, removes the containers, and deletes the `animated-runner-*` registrations from the repo. A job that is running is cancelled, and GitHub shows it as failed. To let running jobs finish first, wait until `status` shows no runner as busy.
+It stops the slot loops, removes the containers, and deletes the `animated-runner-*` registrations from the repo. It refuses while a runner is running a job, because removing that runner's container fails the job, and exits 1 naming the busy runner. Wait until `status` shows no runner as busy, then run `stop` again. It also refuses when it cannot read the runners from GitHub. `stop --force` stops anyway, and a running job is then cancelled and GitHub shows it as failed.
 
 ## Update the image
 
