@@ -102,8 +102,11 @@ const requestSchema = {
 };
 
 // Client-facing views of lab records — explicit column lists, never SELECT *.
+// A client reads a Sample's intake state (Pending review, On hold, Accepted) and nothing behind it: no reasons, no person.
+// A cancelled Sample, which includes a rejected one, keeps its old intake value, so the client gets none and reads the status.
+const CLIENT_INTAKE = `CASE WHEN s.status = 'Cancelled' THEN NULL ELSE s.intake END AS intake`;
 const CLIENT_SAMPLE = `
-  SELECT s.id, s.code, s.description, s.product_code, s.batch_no, s.client_ref, s.sample_type, s.stage, s.priority, s.status,
+  SELECT s.id, s.code, s.description, s.product_code, s.batch_no, s.client_ref, s.sample_type, s.stage, s.priority, s.status, ${CLIENT_INTAKE},
     s.received_at, s.due_date, s.reported_at, p.code AS project_code, p.title AS project_title,
     (SELECT COUNT(*) FROM tests t WHERE t.sample_id = s.id AND t.status != 'Cancelled') AS test_count,
     (SELECT COUNT(*) FROM tests t WHERE t.sample_id = s.id AND t.status = 'Approved') AS tests_done
@@ -113,7 +116,7 @@ function submissionView(sub, { forClient }) {
   const methodIds = json(sub.method_ids, []);
   const methods = methodIds.length ? all(`SELECT id, code, version, title, technique FROM methods WHERE id IN (${ph(methodIds)})`, ...methodIds) : [];
   const sampleIds = json(sub.sample_ids, []);
-  const samples = sampleIds.length ? all(`SELECT id, code, status, description FROM samples WHERE id IN (${ph(sampleIds)}) AND client_id = ? ORDER BY id`, ...sampleIds, sub.client_id) : [];
+  const samples = sampleIds.length ? all(`SELECT s.id, s.code, s.status, ${CLIENT_INTAKE}, s.description FROM samples s WHERE s.id IN (${ph(sampleIds)}) AND s.client_id = ? ORDER BY s.id`, ...sampleIds, sub.client_id) : [];
   const project = sub.project_id ? get('SELECT id, code, title FROM projects WHERE id = ? AND client_id = ?', sub.project_id, sub.client_id) ?? null : null;
   const out = { ...sub, samples: json(sub.samples, []), method_ids: methodIds, methods, received_samples: samples, project };
   delete out.sample_ids;
@@ -248,7 +251,7 @@ export function acknowledgeSubmission(ctx, id, rawNote) {
   });
 }
 
-const longDate = (date) => new Date(`${date}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+export const longDate = (date) => new Date(`${date}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
 /** The arrival notice's completion line: one date, or each tier's date and samples when a shipment mixes them. */
 function dueSummary(samples) {
