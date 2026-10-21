@@ -84,7 +84,7 @@ test('a draft gets every problem at its path, from the checks the real submissio
       { rule: 'shipment-field', path: 'ship_date', message: 'Ship date must be a valid date' },
       { rule: 'project-open', path: 'project_id', message: 'Project not found' },
       { rule: 'sample-field', path: 'samples.0.description', message: 'Sample 1 description is required' },
-      { rule: 'sample-field', path: 'samples.2.stage', message: `Sample 2 stage must be one of: ${STAGES}`, fix: { value: 'Stability' } },
+      { rule: 'sample-field', path: 'samples.2.stage', message: `Sample 3 stage must be one of: ${STAGES}`, fix: { value: 'Stability' } },
       { rule: 'tests-on-contract', path: 'method_ids', message: 'One of the selected tests is not available', fix: { value: [assay] } },
     ],
   });
@@ -93,6 +93,22 @@ test('a draft gets every problem at its path, from the checks the real submissio
   const missing = await laura.ok('POST', '/api/portal/submissions/check', { project_id: 999999, samples: [{ description: 'a' }] });
   assert.deepEqual(missing.problems, [{ rule: 'shipment-field', path: 'project_id', message: 'Project not found' }], 'a Project that does not exist is listed once, by its field');
   assert.equal(await submissionCount(), before, 'neither the dry run nor the refused submission saved anything');
+});
+
+test('a row problem names the row as the table numbers it, blank rows counted; a caller sending no blank rows is unchanged', async () => {
+  // The portal's table numbers every row of the draft, blank ones included, and sends them all.
+  const draft = { samples: [{ description: 'Named' }, {}, { batch_no: 'LOT-3', details: [{ label: '', value: 'x' }] }] };
+  const check = await laura.ok('POST', '/api/portal/submissions/check', draft);
+  assert.deepEqual(check.problems, [
+    { rule: 'sample-field', path: 'samples.2.description', message: 'Sample 3 description is required' },
+    { rule: 'sample-field', path: 'samples.2.details', message: 'Sample 3 has an extra detail without a label' },
+  ]);
+  const sent = await laura.req('POST', '/api/portal/submissions', draft);
+  assert.deepEqual([sent.status, sent.data.error], [400, 'Sample 3 description is required']);
+  // The lab's receive form drops blank rows before sending, so its second row is "Sample 2" with or without blanks on screen.
+  const acme = (await manager.ok('GET', '/api/clients')).find((c) => c.code === 'ACME');
+  const lab = await manager.req('POST', '/api/samples/receive', { client_id: acme.id, samples: [{ description: 'Named' }, { batch_no: 'LOT-2' }] });
+  assert.deepEqual([lab.status, lab.data.error], [400, 'Sample 2 description is required']);
 });
 
 test('applying every fix the gate offers makes the draft pass, and the same body then submits', async () => {
