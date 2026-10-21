@@ -43,7 +43,7 @@ test('an Excel copy with the client’s seven headings', () => {
           stage: '"frozen" is not a stage we know. Use Stability, R&D, Finished product, Initial, Bulk hold, Other.',
           priority: '"soonish" is not a turnaround we know. Use Same day, Next day, 3 days, One week.',
         },
-        details: [],
+        details: [{ label: 'Status', value: 'frozen' }, { label: 'Urgency', value: 'soonish' }],
         product_code: 'IBU400', description: 'Ibuprofen 400 mg', batch_no: 'B-13', stage: null, priority: null, tests_requested: 'Water', quantity: '30',
       },
     ],
@@ -66,12 +66,12 @@ test('a client’s own sheet where most headings are theirs, not ours, is still 
     '0836J\tDiphenhydramine 50mg Capsule\tInitial\tR635939\tCPC\t2027-01\tTBD\tPO-77',
   ].join('\n'));
   assert.deepEqual(mapping, { header: true, columns: [
-    { label: 'Product Code', use: 'product_code' }, { label: 'PRODUCT NAME', use: 'description' }, { label: 'TYPE', use: 'stage' }, { label: 'LOT#', use: 'batch_no' },
+    { label: 'Product Code', use: 'product_code' }, { label: 'PRODUCT NAME', use: 'description' }, { label: 'TYPE', use: 'extra' }, { label: 'LOT#', use: 'batch_no' },
     { label: 'CLIENT', use: 'extra' }, { label: 'EXP DATE', use: 'extra' }, { label: 'TESTING', use: 'extra' }, { label: 'PO NUMBER', use: 'extra' },
   ] });
   assert.deepEqual(rows, [{
-    problems: {}, product_code: '0836J', description: 'Diphenhydramine 50mg Capsule', stage: 'Initial', batch_no: 'R635939',
-    details: [{ label: 'CLIENT', value: 'CPC' }, { label: 'EXP DATE', value: '2027-01' }, { label: 'TESTING', value: 'TBD' }, { label: 'PO NUMBER', value: 'PO-77' }],
+    problems: {}, product_code: '0836J', description: 'Diphenhydramine 50mg Capsule', batch_no: 'R635939',
+    details: [{ label: 'TYPE', value: 'Initial' }, { label: 'CLIENT', value: 'CPC' }, { label: 'EXP DATE', value: '2027-01' }, { label: 'TESTING', value: 'TBD' }, { label: 'PO NUMBER', value: 'PO-77' }],
   }]);
 });
 
@@ -173,4 +173,17 @@ test('the Sample Submission Log fills every column of the form, and its numberin
     problems: {}, details: [], description: 'Acetaminophen 500mg Tablet', stage: 'Finished product', priority: 'Next day',
     batch_no: 'R00001', product_code: '1234', tests_requested: 'Nitrosamine Impurity by LC-MS', limits: '<26.5ng/day',
   }]);
+});
+
+test('a bare Type or Sample type column and an Item column stay as the client’s detail, never read as stage or a row number', () => {
+  const { mapping, rows } = read('Description\tBatch\tSample type\tItem\nAspirin\tB1\tDrug Product\tTablet 100mg', LAB_FIELDS);
+  assert.deepEqual(uses(mapping), ['description', 'batch_no', 'extra', 'extra']);
+  assert.deepEqual(rows[0].details, [{ label: 'Sample type', value: 'Drug Product' }, { label: 'Item', value: 'Tablet 100mg' }]);
+});
+
+test('a type or turnaround we have no value for is flagged and kept as detail, not lost', () => {
+  const { rows } = read(LOG.replace('\tFP\t1\t', '\tIP\t2\t'));
+  assert.deepEqual(rows[0].details, [{ label: 'TYPE (FP/IP/RM/R&D, Stab. Condition)', value: 'IP' }, { label: '*TAT #', value: '2' }]);
+  assert.deepEqual([rows[0].stage, rows[0].priority], [null, null]);
+  assert.equal(Object.keys(rows[0].problems).length, 2);
 });

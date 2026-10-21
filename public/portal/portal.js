@@ -737,6 +737,8 @@ const ROW_FIELDS = [
 // a spreadsheet or the assistant can still fill them and the lab sees them, but the form does not ask for them.
 // The description leads, and stays in view while the other columns scroll sideways inside the table.
 const TABLE_FIELDS = ROW_FIELDS.slice(0, 7);
+/** The log's columns, then any of the other fields that a spreadsheet or the assistant filled in, so a problem with one can be fixed. */
+const fieldsOf = (samples) => ROW_FIELDS.filter(([k]) => TABLE_FIELDS.some(([t]) => t === k) || samples.some((r) => r[k]));
 const TABLE_MIN = 560;
 const GREETING = 'Paste the shipping email or packing list, or attach your spreadsheet. I fill in the submission and mark what I checked and what I guessed. Nothing goes to the lab until you press Send to lab.';
 
@@ -816,10 +818,10 @@ const fieldBox = (path, label, kind) => html`<div class="as-f ${provClass(path)}
 const details = (row) => (row.details?.length ? html`<p class="srow-extra"><span class="micro">Extra detail</span> ${row.details.map((d, i) => html`${i ? ' · ' : ''}<b>${d.label}</b> ${d.value}`)}</p>` : '');
 
 function samplesTable(d) {
-  return html`<div class="table-wrap as-tbl"><table class="table"><thead><tr><th>#</th>${TABLE_FIELDS.map(([, l]) => html`<th>${l}</th>`)}<th><span class="sr-only">Remove</span></th></tr></thead>
+  return html`<div class="table-wrap as-tbl"><table class="table"><thead><tr><th>#</th>${fieldsOf(d.samples).map(([, l]) => html`<th>${l}</th>`)}<th><span class="sr-only">Remove</span></th></tr></thead>
     <tbody>${d.samples.map((row, i) => html`<tr>
       <td class="muted">${i + 1}</td>
-      ${TABLE_FIELDS.map(([k, l, kind]) => {
+      ${fieldsOf(d.samples).map(([k, l, kind]) => {
         const path = `samples.${i}.${k}`;
         const p = d.provenance[path];
         const problem = problemAt(path);
@@ -833,7 +835,7 @@ function samplesCards(d) {
   return html`<ol class="as-samples">${d.samples.map((row, i) => html`<li class="as-sample">
     <div class="as-sample-head"><span class="as-idx">${i + 1}</span><span class="t">${[row.description, row.batch_no].filter(Boolean).join(' · ') || 'New sample'}</span>
       <button class="btn btn-quiet btn-sm" type="button" data-remove="${i}" aria-label="${`Remove sample ${i + 1}`}" ${desk.busy ? raw('disabled') : ''}>Remove</button></div>
-    <div class="as-grid">${TABLE_FIELDS.map(([k, l, kind]) => fieldBox(`samples.${i}.${k}`, l, kind))}</div>${details(row)}</li>`)}</ol>`;
+    <div class="as-grid">${fieldsOf(d.samples).map(([k, l, kind]) => fieldBox(`samples.${i}.${k}`, l, kind))}</div>${details(row)}</li>`)}</ol>`;
 }
 
 /** What stops Send to lab, in plain words: the gate's problems, then the guesses that change handling. */
@@ -1303,8 +1305,7 @@ function submissionTimeline(s) {
 async function submissionDetail(id, query) {
   const { submission: s, thread_id, can } = await api(`/submissions/${id}`);
   const justSent = query.sent === '1' && SUBMISSION[s.status].open;
-  // The log's columns, then any of the other fields a spreadsheet or an earlier form filled in.
-  const shownFields = ROW_FIELDS.filter(([k]) => TABLE_FIELDS.some(([t]) => t === k) || s.samples.some((r) => r[k]));
+  const shownFields = fieldsOf(s.samples);
   return {
     title: s.code,
     html: html`
@@ -1332,9 +1333,9 @@ async function submissionDetail(id, query) {
           <tbody>${s.samples.map((r, i) => html`<tr><td class="muted">${i + 1}</td>${shownFields.map(([k, l]) => html`<td data-label="${l}">${(k === 'priority' ? r.priority || s.priority : r[k]) || '—'}</td>`)}</tr>`)}</tbody></table></div>
         </section>
         <div class="grid-2">
-          <section class="card card-pad"><h2 style="margin-bottom:14px">Tests requested</h2>
-            ${s.methods.length ? html`<ul class="list" style="margin:-6px 0">${s.methods.map((m) => html`<li style="padding:8px 0"><div style="font-weight:560">${m.title}</div><div class="small muted">${m.code} · ${m.technique}</div></li>`)}</ul>` : html`<p class="muted small">None picked. The lab follows your project plan or your note.</p>`}
-          </section>
+          ${s.methods.length ? html`<section class="card card-pad"><h2 style="margin-bottom:14px">Tests requested</h2>
+            <ul class="list" style="margin:-6px 0">${s.methods.map((m) => html`<li style="padding:8px 0"><div style="font-weight:560">${m.title}</div><div class="small muted">${m.code} · ${m.technique}</div></li>`)}</ul>
+          </section>` : ''}
           <section class="card card-pad"><h2 style="margin-bottom:14px">Handling & shipping</h2>
             <dl class="facts">
               ${s.project ? html`<dt>Project</dt><dd class="js-project"><span class="mono">${s.project.code}</span> ${s.project.title}</dd>` : ''}

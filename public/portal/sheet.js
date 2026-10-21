@@ -15,7 +15,7 @@ export const FIELDS = {
   batch_no: { label: 'Lot number', aliases: ['lot', 'lot no', 'lot number', 'batch', 'batch no', 'batch number'] },
   stage: {
     label: 'Type',
-    aliases: ['status', 'stage', 'type', 'sample type', 'type (fp ip rm r&d, stab condition)'],
+    aliases: ['status', 'stage'],
     noun: 'stage',
     values: {
       Stability: ['stability', 'stab'],
@@ -51,7 +51,11 @@ export const LAB_FIELDS = ['description', 'batch_no', 'client_ref', 'quantity', 
 
 const FIELD_FOR_HEADER = new Map(Object.entries(FIELDS).flatMap(([field, f]) => f.aliases.map((n) => [n, field])));
 // The row-number column ("No.", "#") of a client's log: it numbers the rows and is not a detail of any sample.
-const isRowNumber = (heading) => String(heading).trim() === '#' || ['no', 'item', 'item no'].includes(norm(heading));
+const isRowNumber = (heading) => String(heading).trim() === '#' || norm(heading) === 'no';
+
+// The log's TYPE heading carries its legend, "TYPE (FP/IP/RM/R&D, Stab. Condition)". A bare "Type" is not read as the
+// stage: a lab or a client often means a sample type by it, which is not one.
+const fieldForHeading = (heading) => FIELD_FOR_HEADER.get(norm(heading)) ?? (norm(heading).startsWith('type (') ? 'stage' : undefined);
 const VALUE_FOR = Object.fromEntries(Object.entries(FIELDS).filter(([, f]) => f.values).map(([field, f]) => [
   field, new Map(Object.entries(f.values).flatMap(([value, names]) => [value, ...names].map((n) => [norm(n), value]))),
 ]));
@@ -98,7 +102,7 @@ export function gridFromText(text, kind) {
 
 // A client's sheet may carry more of its own headings than ours, so the first row is headings when it names more of
 // ours than the next row does, not when most of its cells are ours.
-const knownHeadings = (cells = []) => cells.filter((c) => FIELD_FOR_HEADER.has(norm(c))).length;
+const knownHeadings = (cells = []) => cells.filter((c) => fieldForHeading(c)).length;
 const isHeader = (grid) => knownHeadings(grid[0]) > knownHeadings(grid[1]);
 
 const columnName = (i) => `Column ${i < 26 ? String.fromCharCode(65 + i) : i + 1}`;
@@ -118,7 +122,7 @@ export function guessMapping(grid, fields) {
   const taken = new Set();
   const columns = labelsOf(grid, header).map((label, i) => {
     if (!grid.slice(header ? 1 : 0).some((r) => r[i]) || (header && isRowNumber(grid[0][i]))) return { label, use: 'ignore' };
-    const field = header ? FIELD_FOR_HEADER.get(norm(grid[0][i])) : order[i];
+    const field = header ? fieldForHeading(grid[0][i]) : order[i];
     const use = field && fields.includes(field) && !taken.has(field) ? field : 'extra';
     taken.add(use);
     return { label, use };
@@ -153,7 +157,9 @@ export function dropRows(grid, mapping, n) {
 export function readSheet(grid, mapping) {
   const rows = grid.slice(mapping.header ? 1 : 0).map((cells) => {
     const row = { problems: {}, details: [] };
+    const labelOf = {};
     mapping.columns.forEach(({ label, use }, i) => {
+      labelOf[use] = label;
       const cell = cells[i];
       if (!cell || use === 'ignore') return;
       if (use === 'extra') row.details.push({ label, value: cell });
@@ -165,6 +171,7 @@ export function readSheet(grid, mapping) {
       if (value) row[field] = value;
       else {
         row.problems[field] = `"${row[field]}" is not a ${FIELDS[field].noun} we know. Use ${Object.keys(FIELDS[field].values).join(', ')}.`;
+        row.details.push({ label: labelOf[field], value: row[field] });
         row[field] = null;
       }
     }
