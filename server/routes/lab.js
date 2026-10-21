@@ -16,6 +16,7 @@ import {
   unassignedTests, assignTests, claimTest, startTest, saveResults, submitTest, reviewTest, approveTest, cancelTest, issueReport, cancelSample,
 } from '../workflow.js';
 import { intakeHistory } from '../intake-values.js';
+import { acceptedWithChanges } from '../intake-changes.js';
 import { INVESTIGATION_RULES } from '../investigations.js';
 import { methodProblem } from '../intake-feasibility.js';
 import { PROJECT_RULES } from './business.js';
@@ -373,6 +374,7 @@ export default function routes(r) {
         ORDER BY used_with_method DESC, i.category, i.name`, test.method_code, id).map((m) => ({ ...m, problem: materialProblem(m) })),
       analysts: all(`SELECT id, full_name, initials, role FROM users WHERE active = 1 AND role IN (${ph(performers)}) ORDER BY full_name`, ...performers)
         .map((u) => ({ ...u, qualified: isQualified(u.id, test.method_code) })),
+      intake_changes: acceptedWithChanges(test.sample_id),
       can: flags(TEST_RULES, test, me),
       qualifiedMe,
     };

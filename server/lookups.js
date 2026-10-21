@@ -112,6 +112,11 @@ export const SAMPLE_STATUSES = ['Received', 'In Testing', 'In Review', 'Approved
 export const INTAKE_PENDING = 'Pending review';
 export const INTAKE_HOLD = 'On hold';
 export const INTAKE_ACCEPTED = 'Accepted';
+/** What a record in `intake_decisions` says was decided. Rejecting leaves the intake state alone and cancels the Sample. */
+export const DECISION_ACCEPTED = 'Accepted';
+export const DECISION_HELD = 'Held';
+export const DECISION_RELEASED = 'Released';
+export const DECISION_REJECTED = 'Rejected';
 export const SAMPLE_OPEN = ['Received', 'In Testing', 'In Review', 'Approved'];
 export const CUSTODY_ACTIONS = ['Moved', 'Removed for testing', 'Returned to storage', 'Aliquoted', 'Returned to client', 'Disposed'];
 

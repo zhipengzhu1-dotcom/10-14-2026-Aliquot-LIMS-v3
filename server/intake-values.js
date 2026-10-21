@@ -13,6 +13,8 @@ const FIELDS = [
 ];
 // The choices a Submission makes once for all its Samples; a row that states none of its own inherits them.
 const SUBMISSION_WIDE = ['sample_type', 'priority', 'storage'];
+/** Every Sample field a correction can touch, by name. */
+export const FIELD_LABELS = { ...Object.fromEntries(FIELDS), due_date: 'Due date', notes: 'Notes', project_id: 'Project' };
 const CURRENT = [...FIELDS.map(([key]) => key), 'due_date', 'notes', 'project_code'];
 
 const text = (v) => (v == null ? '' : String(v).trim());
