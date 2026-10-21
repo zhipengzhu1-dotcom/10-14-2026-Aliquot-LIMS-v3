@@ -274,6 +274,28 @@ test('extra detail from a client’s sheet is kept with the submission and lands
   assertNoDetails('the client sample list', await laura.ok('GET', '/api/portal/samples?status=all'));
 });
 
+test('a sample’s tests requested and limits travel with the submission and land on the received sample as client detail', async () => {
+  const laura = await portal(LAURA);
+  const sub = await laura.ok('POST', '/api/portal/submissions', {
+    samples: [
+      { description: 'Acetaminophen 500mg Tablet', tests_requested: 'Nitrosamine Impurity by LC-MS', limits: '<26.5ng/day', details: DETAILS },
+      { description: 'Plain' },
+    ],
+  });
+  const [first, second] = (await manager.ok('GET', `/api/portal-admin/submissions/${sub.id}`)).submission.samples;
+  assert.deepEqual([first.tests_requested, first.limits, second.tests_requested, second.limits], ['Nitrosamine Impurity by LC-MS', '<26.5ng/day', undefined, undefined]);
+
+  const nadia = await staff('nadia.rossi');
+  const [kept, plain] = (await nadia.ok('POST', `/api/portal-admin/submissions/${sub.id}/receive`, {})).samples;
+  assert.deepEqual((await nadia.ok('GET', `/api/samples/${kept.id}`)).details, [
+    { label: 'Tests requested', value: 'Nitrosamine Impurity by LC-MS' }, { label: 'Limits', value: '<26.5ng/day' }, ...DETAILS,
+  ]);
+  assert.deepEqual((await nadia.ok('GET', `/api/samples/${plain.id}`)).details, []);
+
+  const tooLong = await laura.post('/api/portal/submissions', { samples: [{ description: 'Aspirin', limits: 'x'.repeat(121) }] });
+  assert.equal(tooLong.status, 400);
+});
+
 test('an issued certificate never carries the sample’s extra detail, in the lab or the portal', async () => {
   const laura = await portal(LAURA);
   const reported = (await laura.ok('GET', '/api/portal/samples?status=reported'))[0];

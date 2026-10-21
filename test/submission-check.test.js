@@ -117,7 +117,7 @@ test('an empty draft is told to add a sample, and the dry run is the signed-in c
 });
 
 test('the body the submission desk sends, every field present and blank rows left in, checks and submits as typed', async () => {
-  const blank = { description: null, product_code: null, batch_no: null, client_ref: null, quantity: null, container: null, stage: null, priority: null, details: [] };
+  const blank = { description: null, product_code: null, batch_no: null, client_ref: null, quantity: null, container: null, stage: null, priority: null, tests_requested: null, limits: null, details: [] };
   const body = {
     project_id: null, sample_type: null, priority: 'One week', storage: 'Refrigerated (2–8 °C)', courier: 'FedEx', tracking_no: '7789 1123 0045', ship_date: '2026-10-20', notes: null,
     method_ids: [], samples: [blank, { ...blank, description: 'Paracetamol 500 mg tablet', batch_no: 'LOT-2291', stage: 'Finished product' }, blank],

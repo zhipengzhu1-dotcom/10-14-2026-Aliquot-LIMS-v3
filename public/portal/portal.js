@@ -5,7 +5,7 @@
 import { html, raw, esc } from '/js/core/html.js';
 import { icon } from '/js/core/icons.js';
 import { snapshot, settle } from '/js/core/motion.js';
-import { FIELDS, PORTAL_FIELDS, gridFromText, guessMapping, remap, withHeader, readSheet, dropRows, planTests } from './sheet.js';
+import { FIELDS, PORTAL_FIELDS, gridFromText, guessMapping, remap, withHeader, readSheet, dropRows } from './sheet.js';
 
 // ---------------------------------------------------------------------------------------------
 // Small helpers
@@ -698,15 +698,14 @@ async function sheetsFromFile(file) {
   return [{ name: file.name, rows: gridFromText(text, 'csv'), truncated: false }];
 }
 
-/** The paste preview: every parsed row, problem cells highlighted with their message, and what the Test column means. */
-function pastePreview(rows, mapping, plan, { fit }) {
+/** The paste preview: every parsed row, with problem cells highlighted with their message. */
+function pastePreview(rows, mapping, { fit }) {
   if (!rows.length) return '';
   const cols = mapping.columns.map((c) => c.use).filter((use) => FIELDS[use]).map((k) => [k, FIELDS[k].label]);
   const extra = rows.some((r) => r.details.length);
   const flagged = rows.filter((r) => Object.keys(r.problems).length).length;
   return html`
-    <p class="paste-sum"><b>${plural(rows.length, 'sample')}</b> found${flagged ? html` · <span class="bad-text">${plural(flagged, 'row needs', 'rows need')} a look</span>` : plan.problem ? '' : ' · all look good'}${mapping.header ? '' : ' · no heading row, read as your usual column order'}</p>
-    ${plan.problem ? html`<div class="alert alert-warn">${ic('alert', 16)}<span>${plan.problem}</span></div>` : ''}
+    <p class="paste-sum"><b>${plural(rows.length, 'sample')}</b> found${flagged ? html` · <span class="bad-text">${plural(flagged, 'row needs', 'rows need')} a look</span>` : ' · all look good'}${mapping.header ? '' : ' · no heading row, read as your usual column order'}</p>
     ${rows.length > fit ? html`<div class="alert alert-warn">${ic('alert', 16)}<span>Only ${plural(fit, 'more sample fits', 'more samples fit')} in this submission (${MAX_SAMPLES} at most). The rest stay here to send next time.</span></div>` : ''}
     <div class="table-wrap paste-table"><table class="table"><thead><tr><th>#</th>${cols.map(([, l]) => html`<th>${l}</th>`)}${extra ? html`<th>Extra detail</th>` : ''}</tr></thead>
       <tbody>${rows.map((r, i) => html`<tr><td class="muted">${i + 1}</td>${cols.map(([k]) => html`<td class="${r.problems[k] ? 'cell-bad' : ''}">${r[k] || (r.problems[k] ? '' : '—')}${r.problems[k] ? html`<div class="cell-why">${r.problems[k]}</div>` : ''}</td>`)}${extra ? html`<td class="cell-extra">${r.details.map((d) => html`<div><b>${d.label}</b> ${d.value}</div>`)}</td>` : ''}</tr>`)}</tbody>
@@ -726,29 +725,34 @@ const SOURCES = {
   default: { tag: 'default', help: 'The portal default' },
   edited: { tag: 'you edited', help: 'You set or confirmed this' },
 };
-// Guesses that change how the lab handles the box; sending waits until the client confirms them (server/assistant.js).
-const MUST_CONFIRM = ['storage', 'ship_date'];
-const SHIP_FIELDS = [
-  ['project_id', 'Project', 'projects'], ['sample_type', 'Sample type', 'sampleTypes'], ['storage', 'Storage', 'storageConditions'],
-  ['priority', 'Turnaround', 'priorities'], ['courier', 'Courier', 'text'], ['tracking_no', 'Tracking number', 'text'],
-  ['ship_date', 'Ship date', 'date'], ['notes', 'Notes for the lab', 'area'],
-];
+// The form asks for samples only. What the assistant drafts for the rest of the submission is dropped here, since
+// the client has no field to check or change it.
+const SHIPMENT_KEYS = ['project_id', 'sample_type', 'priority', 'storage', 'courier', 'tracking_no', 'ship_date', 'notes', 'method_ids'];
 const ROW_FIELDS = [
-  ['description', 'Sample name', 'text'], ['batch_no', 'Batch / lot', 'text'], ['product_code', 'Product code', 'text'], ['stage', 'Stage', 'stages'],
-  ['priority', 'Turnaround', 'tiers'], ['quantity', 'Quantity', 'text'], ['client_ref', 'Your reference', 'text'], ['container', 'Container', 'text'],
+  ['description', 'Sample description', 'text'], ['stage', 'Type', 'stages'], ['priority', 'TAT', 'tiers'], ['batch_no', 'Lot number', 'text'],
+  ['product_code', 'Product code', 'text'], ['tests_requested', 'Tests requested', 'text'], ['limits', 'Limits', 'text'],
+  ['quantity', 'Quantity', 'text'], ['client_ref', 'Your reference', 'text'], ['container', 'Container', 'text'],
 ];
-// The table leads with the batch, which stays in view while the other columns scroll sideways inside the table.
-const TABLE_FIELDS = ['batch_no', 'description', 'stage', 'priority', 'quantity', 'product_code', 'client_ref', 'container'].map((k) => ROW_FIELDS.find(([f]) => f === k));
+// The form shows the columns of the lab's Sample Submission Log, in its order. The last three fields are not in the log:
+// a spreadsheet or the assistant can still fill them and the lab sees them, but the form does not ask for them.
+// The description leads, and stays in view while the other columns scroll sideways inside the table.
+const TABLE_FIELDS = ROW_FIELDS.slice(0, 7);
 const TABLE_MIN = 560;
 const GREETING = 'Paste the shipping email or packing list, or attach your spreadsheet. I fill in the submission and mark what I checked and what I guessed. Nothing goes to the lab until you press Send to lab.';
 
 // A row's id says which sample it is when the assistant adds, drops or reorders rows; it never reaches the lab. The
 // browser and the server both take new ids from the draft's next_row and only count up, so no id comes back.
-const blankRow = (id) => ({ id, description: null, product_code: null, batch_no: null, client_ref: null, quantity: null, container: null, stage: null, priority: null, details: [] });
+const blankRow = (id) => ({ id, description: null, product_code: null, batch_no: null, client_ref: null, quantity: null, container: null, stage: null, priority: null, tests_requested: null, limits: null, details: [] });
 const blankDraft = (lk) => ({
   project_id: null, sample_type: null, priority: lk.defaultPriority, storage: null, courier: null, tracking_no: null, ship_date: null, notes: null,
   method_ids: [], samples: [blankRow('r1')], next_row: 2, provenance: { priority: { source: 'default' } }, questions: [],
 });
+/** The draft with everything but its samples as a blank draft has it. */
+function samplesOnly(draft) {
+  const blank = blankDraft(desk.lk);
+  const provenance = Object.fromEntries(Object.entries(draft.provenance).filter(([path]) => !SHIPMENT_KEYS.includes(path)));
+  return { ...draft, ...Object.fromEntries(SHIPMENT_KEYS.map((k) => [k, blank[k]])), provenance: { ...provenance, ...blank.provenance } };
+}
 const getAt = (o, path) => path.split('.').reduce((a, k) => a?.[k], o);
 function setAt(o, path, value) {
   const keys = path.split('.');
@@ -775,22 +779,6 @@ function newRow() {
   return blankRow(`r${desk.draft.next_row++}`);
 }
 
-const rowLabel = (path) => {
-  const m = /^samples\.(\d+)\.(\w+)$/.exec(path);
-  if (!m) return null;
-  const row = desk.draft.samples[+m[1]];
-  return `${row?.batch_no || `Sample ${+m[1] + 1}`} ${(ROW_FIELDS.find(([k]) => k === m[2])?.[1] ?? 'extra detail').toLowerCase()}`;
-};
-const labelOf = (path) => rowLabel(path) ?? SHIP_FIELDS.find(([k]) => k === path)?.[1] ?? { method_ids: 'Tests', samples: 'Samples' }[path] ?? path;
-
-function shown(path) {
-  const v = getAt(desk.draft, path);
-  if (path === 'project_id') return desk.lk.projects.find((p) => p.id === v)?.code ?? v;
-  if (path === 'method_ids') return v.map((id) => desk.lk.methods.find((m) => m.id === id)?.title ?? id).join(', ');
-  if (Array.isArray(v)) return v.map((d) => `${d.label}: ${d.value}`).join(', ');
-  return v;
-}
-
 const problemAt = (path) => desk.gate?.problems.find((p) => p.path === path);
 
 function provClass(path) {
@@ -811,10 +799,6 @@ function control(path, kind, label) {
   const v = getAt(desk.draft, path);
   const id = fid(path);
   const lists = {
-    projects: [['', 'No specific project'], ...lk.projects.map((p) => [String(p.id), `${p.code} · ${p.title}`])],
-    sampleTypes: [['', 'Choose'], ...lk.sampleTypes.map((t) => [t, t])],
-    storageConditions: [['', 'Choose'], ...lk.storageConditions.map((t) => [t, t])],
-    priorities: lk.priorities.map((t) => [t, t]),
     stages: [['', 'Choose'], ...lk.stages.map((t) => [t, t])],
     tiers: [['', `As shipment (${desk.draft.priority})`], ...lk.priorities.map((t) => [t, t])],
   }[kind];
@@ -823,8 +807,7 @@ function control(path, kind, label) {
     const options = lists.some(([o]) => o === value) ? lists : [...lists, [value, value]];
     return html`<select class="select" id="${id}" data-path="${path}" aria-label="${label}">${options.map(([o, l]) => html`<option value="${o}" ${o === value ? raw('selected') : ''}>${l}</option>`)}</select>`;
   }
-  if (kind === 'area') return html`<textarea class="textarea" id="${id}" data-path="${path}" rows="2" aria-label="${label}">${v ?? ''}</textarea>`;
-  return html`<input class="input" id="${id}" data-path="${path}" type="${kind === 'date' ? 'date' : 'text'}" value="${v ?? ''}" aria-label="${label}">`;
+  return html`<input class="input" id="${id}" data-path="${path}" type="text" value="${v ?? ''}" aria-label="${label}">`;
 }
 
 const fieldBox = (path, label, kind) => html`<div class="as-f ${provClass(path)}" data-field="${path}">
@@ -850,63 +833,24 @@ function samplesCards(d) {
   return html`<ol class="as-samples">${d.samples.map((row, i) => html`<li class="as-sample">
     <div class="as-sample-head"><span class="as-idx">${i + 1}</span><span class="t">${[row.description, row.batch_no].filter(Boolean).join(' · ') || 'New sample'}</span>
       <button class="btn btn-quiet btn-sm" type="button" data-remove="${i}" aria-label="${`Remove sample ${i + 1}`}" ${desk.busy ? raw('disabled') : ''}>Remove</button></div>
-    <div class="as-grid">${ROW_FIELDS.map(([k, l, kind]) => fieldBox(`samples.${i}.${k}`, l, kind))}</div>${details(row)}</li>`)}</ol>`;
-}
-
-/** One row per distinct guess: the same guess on three lots is one thing to check, not three. */
-function guessGroups() {
-  const groups = new Map();
-  for (const [path, p] of Object.entries(desk.draft.provenance)) {
-    if (p.source !== 'guessed') continue;
-    const field = /^samples\.\d+\.(\w+)$/.exec(path)?.[1] ?? path;
-    const value = shown(path);
-    const key = JSON.stringify([field, value, p.reason]);
-    if (!groups.has(key)) groups.set(key, { field, value, reason: p.reason, paths: [] });
-    groups.get(key).paths.push(path);
-  }
-  return [...groups.values()].map((g) => ({ ...g, label: g.paths.length > 1 ? `${ROW_FIELDS.find(([k]) => k === g.field)?.[1] ?? g.field} on ${g.paths.length} samples` : labelOf(g.paths[0]) }));
+    <div class="as-grid">${TABLE_FIELDS.map(([k, l, kind]) => fieldBox(`samples.${i}.${k}`, l, kind))}</div>${details(row)}</li>`)}</ol>`;
 }
 
 /** What stops Send to lab, in plain words: the gate's problems, then the guesses that change handling. */
 function blockers() {
   if (!desk.gate) return ['the checks have not run yet'];
   return [
-    ...desk.gate.problems.map((p) => (p.fix ? `${labelOf(p.path).toLowerCase()}: take the suggested value` : p.message)),
-    ...MUST_CONFIRM.filter((p) => desk.draft.provenance[p]?.source === 'guessed').map((p) => `confirm ${labelOf(p).toLowerCase()} (${shown(p)})`),
+    ...desk.gate.problems.map((p) => p.message),
     ...(desk.checking ? ['checking your changes'] : []),
     ...(desk.busy ? ['the assistant is still drafting'] : []),
   ];
 }
 
-function ledgerHtml() {
-  const problems = desk.gate?.problems ?? [];
-  const fixed = Object.entries(desk.draft.provenance).filter(([, p]) => p.source === 'fixed');
-  const guesses = guessGroups();
-  return html`<section class="card as-ledger" aria-label="Checks and guesses">
-    <div class="card-head"><h2>Before it goes</h2>${desk.gate ? (problems.length ? pill(plural(problems.length, 'thing') + ' for you', 'bad') : pill('all checks pass', 'ok')) : pill('checking', 'info')}</div>
-    <div class="as-cols">
-      <section><h3 class="micro">Checked</h3>
-        ${problems.length ? html`<ul class="as-list">${problems.map((p) => html`<li class="ask"><b>${labelOf(p.path)}</b><span>${p.message}</span>${p.fix ? html`<button class="btn btn-sm" type="button" data-fix="${p.path}">Use ${Array.isArray(p.fix.value) ? 'the tests you can order' : `“${p.fix.value}”`}</button>` : ''}</li>`)}</ul>` : ''}
-        ${fixed.length ? html`<ul class="as-list">${fixed.map(([path, p]) => html`<li class="fixed"><b>${labelOf(path)}</b><span>${p.reason}</span></li>`)}</ul>` : ''}
-        ${desk.gate && !problems.length ? html`<p class="small muted">Every check the lab runs on a submission passes.</p>` : ''}
-      </section>
-      <section><h3 class="micro">Guessed</h3>
-        ${guesses.length ? html`<ul class="as-list">${guesses.map((g) => html`<li class="guess"><b>${g.label} = ${g.value}</b>${MUST_CONFIRM.includes(g.field) ? pill('needed to send', 'bad') : ''}<span>${g.reason}</span><button class="btn btn-sm" type="button" data-confirm="${g.paths.join(' ')}">Looks right</button></li>`)}</ul>`
-          : html`<p class="small muted">Nothing guessed.</p>`}
-      </section>
-    </div>
-  </section>`;
-}
-
 function formHtml() {
   const d = desk.draft;
-  const lk = desk.lk;
   return html`<section class="card as-form" aria-label="Submission draft">
     <div class="card-head"><h2>Submission draft</h2><span class="micro faint">Edit anything</span></div>
-    <div class="slip-sec"><h2><span class="step-n">01</span>Shipment</h2><div class="as-grid">${SHIP_FIELDS.map(([k, l, kind]) => fieldBox(k, l, kind))}</div></div>
-    <div class="slip-sec"><h2><span class="step-n">02</span>Tests you are ordering <span class="js-tag" data-tag="method_ids">${provTag('method_ids')}</span></h2>
-      <div class="chips">${lk.methods.map((m) => html`<label class="chip" title="${`${m.code} · ${m.technique}`}"><input type="checkbox" data-method="${m.id}" ${d.method_ids.includes(m.id) ? raw('checked') : ''}><span>${m.title}</span></label>`)}</div></div>
-    <div class="slip-sec"><h2><span class="step-n">03</span>Samples <span class="micro faint">${d.samples.length} of ${MAX_SAMPLES} max</span></h2>
+    <div class="slip-sec"><h2><span class="step-n">01</span>Samples <span class="micro faint">${d.samples.length} of ${MAX_SAMPLES} max</span></h2>
       ${desk.table ? samplesTable(d) : samplesCards(d)}
       <div class="row wrap" style="margin-top:10px"><button class="btn btn-sm" type="button" data-add ${d.samples.length >= MAX_SAMPLES || desk.busy ? raw('disabled') : ''}>${ic('plus', 15)} Add a sample</button>
         <button class="linkish js-paste" type="button">Add from a spreadsheet</button></div></div>
@@ -918,9 +862,9 @@ function sendHtml() {
   const d = desk.draft;
   const named = d.samples.filter((r) => r.description).length;
   const block = blockers();
-  const soft = Object.entries(d.provenance).filter(([p, v]) => v.source === 'guessed' && !MUST_CONFIRM.includes(p)).length;
+  const soft = Object.entries(d.provenance).filter(([, v]) => v.source === 'guessed').length;
   return html`<div class="send-bar as-send">
-    <div class="count"><b>${plural(named, 'sample')}</b> · ${plural(d.method_ids.length, 'test')}${d.project_id ? ` · ${shown('project_id')}` : ''}
+    <div class="count"><b>${plural(named, 'sample')}</b>
       <span class="as-hint ${block.length ? 'block' : ''}">${block.length ? `Not ready to send. Still needed: ${block.join('; ')}.` : 'Ready. The lab sees it once you send.'}</span>
       ${soft ? html`<span class="as-hint">${plural(soft, 'other guess', 'other guesses')} unconfirmed. ${soft === 1 ? 'It does' : 'They do'} not hold up sending.</span>` : ''}</div>
     <div class="form-error"></div>
@@ -986,7 +930,7 @@ async function submitView() {
       <div class="as-desk" data-tab="${desk.tab}">
         <div class="as-tabs" role="group" aria-label="View"><button type="button" data-tab="chat">Conversation</button><button type="button" data-tab="draft">Submission <span class="as-count js-count" hidden></span></button></div>
         <div class="as-chat-col js-chat"></div>
-        <div class="as-draft-col"><div class="js-ledger"></div><div class="js-form"></div>${pasteHtml()}<div class="js-sendbar"></div></div>
+        <div class="as-draft-col"><div class="js-form"></div>${pasteHtml()}<div class="js-sendbar"></div></div>
       </div>`,
     mount: mountDesk,
   };
@@ -1013,7 +957,6 @@ function mountDesk(root) {
     if (thread) thread.scrollTop = thread.scrollHeight;
   };
   const renderChecks = () => {
-    $in('.js-ledger').innerHTML = String(ledgerHtml());
     $in('.js-sendbar').innerHTML = String(sendHtml());
     $$('[data-field]', root).forEach((el) => {
       const path = el.dataset.field;
@@ -1021,8 +964,6 @@ function mountDesk(root) {
       const tag = $('.js-tag', el);
       if (tag) tag.innerHTML = String(provTag(path));
     });
-    const tests = $in('[data-tag=method_ids]');
-    if (tests) tests.innerHTML = String(provTag('method_ids'));
     renderTabs();
   };
   const renderDraft = () => {
@@ -1114,12 +1055,12 @@ function mountDesk(root) {
     try {
       const res = await postStreamed('/assistant', { message: text, draft: desk.draft, history: before, declined: desk.declined, ...desk.choice }, showPartialReply);
       const editedMeanwhile = desk.touched.size > 0;
-      desk.draft = keepTouched(res.draft);
+      desk.draft = samplesOnly(keepTouched(res.draft));
       // A proposal belongs to the turn that asked it; the new reply asks again whatever is still open.
       for (const q of desk.messages.flatMap((msg) => msg.questions ?? [])) if (q.proposal && !q.answered) q.retired = 'Replaced by the newer reply.';
       desk.gate = editedMeanwhile ? null : res.gate;
       desk.messages.push({
-        role: 'assistant', text: res.reply, questions: res.draft.questions, attempts: res.attempts, unresolved: res.unresolved,
+        role: 'assistant', text: res.reply, questions: res.draft.questions.filter((q) => !SHIPMENT_KEYS.includes(q.path)), attempts: res.attempts, unresolved: res.unresolved,
         meta: `${res.model_label} · ${res.effort} effort · ${(res.ms / 1000).toFixed(1)} s${res.attempts > 1 ? ` · ${res.attempts} tries` : ''}`,
       });
       check();
@@ -1205,29 +1146,10 @@ function mountDesk(root) {
     if (el.dataset.path && el.tagName === 'SELECT') {
       setValue(el);
       changed({ structure: el.dataset.path === 'priority' });
-    } else if (el.dataset.method) {
-      const id = Number(el.dataset.method);
-      desk.draft.method_ids = el.checked ? [...desk.draft.method_ids, id] : desk.draft.method_ids.filter((x) => x !== id);
-      mark('method_ids', 'edited');
-      changed();
     }
   });
   draftCol.addEventListener('click', async (e) => {
     const d = desk.draft;
-    const confirm = e.target.closest('[data-confirm]');
-    if (confirm) {
-      confirm.dataset.confirm.split(' ').forEach((path) => mark(path, 'edited', 'You confirmed this.'));
-      changed({ structure: true });
-      return;
-    }
-    const fix = e.target.closest('[data-fix]');
-    if (fix) {
-      const problem = problemAt(fix.dataset.fix);
-      setAt(d, problem.path, problem.fix.value);
-      mark(problem.path, 'fixed', 'You took the value the check suggested.');
-      changed({ structure: true });
-      return;
-    }
     const remove = e.target.closest('[data-remove]');
     if (remove) {
       const i = Number(remove.dataset.remove);
@@ -1276,12 +1198,11 @@ function mountDesk(root) {
   const preview = () => {
     if (sheet) {
       sheet.rows = readSheet(sheet.grid, sheet.mapping).rows;
-      sheet.plan = planTests(sheet.rows, desk.lk.methods);
     }
     const rows = sheet?.rows ?? [];
     const fit = MAX_SAMPLES - desk.draft.samples.filter((r) => !blank(r)).length;
     $('.js-map', panel).innerHTML = sheet ? String(mapPanel(sheet.grid, sheet.mapping)) : '';
-    $('.js-preview', panel).innerHTML = sheet ? String(pastePreview(rows, sheet.mapping, sheet.plan, { fit })) : '';
+    $('.js-preview', panel).innerHTML = sheet ? String(pastePreview(rows, sheet.mapping, { fit })) : '';
     const add = $('.js-paste-add', panel);
     const n = Math.min(rows.length, fit);
     add.hidden = n === 0;
@@ -1338,7 +1259,7 @@ function mountDesk(root) {
     const d = desk.draft;
     const kept = d.samples.filter((r) => !blank(r));
     const fit = MAX_SAMPLES - kept.length;
-    const { rows: taken, plan, grid, mapping } = sheet;
+    const { rows: taken, grid, mapping } = sheet;
     const added = taken.slice(0, fit);
     const keptProvenance = Object.entries(d.provenance).filter(([path]) => {
       const m = /^samples\.(\d+)\./.exec(path);
@@ -1350,11 +1271,6 @@ function mountDesk(root) {
       for (const [k] of ROW_FIELDS) if (r[k]) mark(`samples.${kept.length + j}.${k}`, 'sheet');
       if (r.details.length) mark(`samples.${kept.length + j}.details`, 'sheet');
     });
-    const tests = plan.methodIds.filter((id) => !d.method_ids.includes(id));
-    if (tests.length) {
-      d.method_ids = [...d.method_ids, ...tests];
-      mark('method_ids', 'sheet');
-    }
     const left = taken.length - added.length;
     box.value = '';
     sheet = left > 0 ? { grid: dropRows(grid, mapping, fit), mapping } : null;
@@ -1387,6 +1303,8 @@ function submissionTimeline(s) {
 async function submissionDetail(id, query) {
   const { submission: s, thread_id, can } = await api(`/submissions/${id}`);
   const justSent = query.sent === '1' && SUBMISSION[s.status].open;
+  // The log's columns, then any of the other fields a spreadsheet or an earlier form filled in.
+  const shownFields = ROW_FIELDS.filter(([k]) => TABLE_FIELDS.some(([t]) => t === k) || s.samples.some((r) => r[k]));
   return {
     title: s.code,
     html: html`
@@ -1410,8 +1328,8 @@ async function submissionDetail(id, query) {
         </section>
         <section class="card">
           <div class="card-head"><h2>What you told us</h2></div>
-          <div class="table-wrap"><table class="table responsive"><thead><tr><th>#</th><th>Description</th><th>Product code</th><th>Batch / lot</th><th>Stage</th><th>Urgency</th><th>Quantity</th><th>Your reference</th><th>Container</th></tr></thead>
-          <tbody>${s.samples.map((r, i) => html`<tr><td class="muted">${i + 1}</td><td>${r.description}</td><td data-label="Code">${r.product_code || '—'}</td><td data-label="Batch">${r.batch_no || '—'}</td><td data-label="Stage">${r.stage || '—'}</td><td data-label="Urgency">${r.priority || s.priority}</td><td data-label="Qty">${r.quantity || '—'}</td><td data-label="Ref.">${r.client_ref || '—'}</td><td data-label="Container">${r.container || '—'}</td></tr>`)}</tbody></table></div>
+          <div class="table-wrap"><table class="table responsive"><thead><tr><th>#</th>${shownFields.map(([, l]) => html`<th>${l}</th>`)}</tr></thead>
+          <tbody>${s.samples.map((r, i) => html`<tr><td class="muted">${i + 1}</td>${shownFields.map(([k, l]) => html`<td data-label="${l}">${(k === 'priority' ? r.priority || s.priority : r[k]) || '—'}</td>`)}</tr>`)}</tbody></table></div>
         </section>
         <div class="grid-2">
           <section class="card card-pad"><h2 style="margin-bottom:14px">Tests requested</h2>

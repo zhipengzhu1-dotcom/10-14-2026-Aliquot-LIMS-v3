@@ -106,6 +106,7 @@ export function checkSampleRows(raw, { max = 500, legacyTiers = false } = {}) {
       const { value, problems: refused } = cleanAll(s, {
         description: { required: true, label: `sample ${i + 1} description` },
         batch_no: { max }, client_ref: { max }, quantity: { max }, container: { max },
+        tests_requested: { max, label: `sample ${i + 1} tests requested` }, limits: { max, label: `sample ${i + 1} limits` },
         product_code: { max, label: `sample ${i + 1} product code` },
         stage: { type: 'enum', values: STAGES, label: `sample ${i + 1} stage` },
         priority: { type: 'enum', values: tiers, label: `sample ${i + 1} turnaround` },
@@ -152,7 +153,13 @@ export function receiveSamples(ctx, body, { legacyTiers = false } = {}) {
   const methods = loadUsableMethods(idList(body.method_ids));
   const dueFor = (priority) => common.due_date || defaultDueDate(dateOf(common.received_at), methods, priority);
 
-  const created = tx(() => rows.map(({ details, ...row }) => {
+  // A client's tests and limits for one sample are the lab's to read, not columns of a sample: they are kept with its other client detail.
+  const created = tx(() => rows.map(({ details: sheetDetails, tests_requested, limits, ...row }) => {
+    const details = [
+      ...(tests_requested ? [{ label: 'Tests requested', value: tests_requested }] : []),
+      ...(limits ? [{ label: 'Limits', value: limits }] : []),
+      ...sheetDetails,
+    ];
     const code = nextCode('S');
     const due = dueFor(row.priority);
     const id = insert(ctx, 'samples', {
