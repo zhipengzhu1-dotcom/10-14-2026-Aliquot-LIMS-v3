@@ -94,7 +94,8 @@ const hasContent = (v) => (Array.isArray(v) ? v.length > 0 : String(v ?? '').tri
  * The one check of sample rows, from the lab's receipt form and from a client's submission: the cleaned rows and every
  * problem, each at its path in `raw` (`samples.<index>.<field>`). `max` caps each text field; `legacyTiers` admits the
  * retired tiers a submission stored before they were retired may carry. Every row comes back with `details`, an empty
- * list when the sheet had none.
+ * list when the sheet had none. Blank rows are dropped, but a message numbers its row by its place in `raw` (the
+ * number beside it in the caller's table), the same place as its path.
  */
 export function checkSampleRows(raw, { max = 500, legacyTiers = false } = {}) {
   const tiers = legacyTiers ? Object.keys(PRIORITY_TIERS) : PRIORITIES;
@@ -102,19 +103,20 @@ export function checkSampleRows(raw, { max = 500, legacyTiers = false } = {}) {
   const rows = (Array.isArray(raw) ? raw : [])
     .map((s, at) => [s, at])
     .filter(([s]) => s && typeof s === 'object' && Object.values(s).some(hasContent))
-    .map(([s, at], i) => {
+    .map(([s, at]) => {
+      const n = at + 1;
       const { value, problems: refused } = cleanAll(s, {
-        description: { required: true, label: `sample ${i + 1} description` },
+        description: { required: true, label: `sample ${n} description` },
         batch_no: { max }, client_ref: { max }, quantity: { max }, container: { max },
-        tests_requested: { max, label: `sample ${i + 1} tests requested` }, limits: { max, label: `sample ${i + 1} limits` },
-        product_code: { max, label: `sample ${i + 1} product code` },
-        stage: { type: 'enum', values: STAGES, label: `sample ${i + 1} stage` },
-        priority: { type: 'enum', values: tiers, label: `sample ${i + 1} turnaround` },
+        tests_requested: { max, label: `sample ${n} tests requested` }, limits: { max, label: `sample ${n} limits` },
+        product_code: { max, label: `sample ${n} product code` },
+        stage: { type: 'enum', values: STAGES, label: `sample ${n} stage` },
+        priority: { type: 'enum', values: tiers, label: `sample ${n} turnaround` },
       });
       problems.push(...refused.map(({ key, ...p }) => ({ path: `samples.${at}.${key}`, rule: 'sample-field', ...p })));
       let details = [];
       try {
-        details = cleanDetails(s.details, i + 1);
+        details = cleanDetails(s.details, n);
       } catch (e) {
         if (!(e instanceof HttpError)) throw e;
         problems.push({ path: `samples.${at}.details`, rule: 'sample-field', message: e.message });
