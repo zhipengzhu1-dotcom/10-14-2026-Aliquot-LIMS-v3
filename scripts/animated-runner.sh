@@ -13,10 +13,12 @@ LOGS="$HOME/Library/Logs/animated-runner"
 slots() {
   local pid script
   for pid in $(pgrep -f 'animated-runner\.sh slot' || true); do
-    script=$(ps -o args= -p "$pid" | sed -nE 's/^(caffeinate -i )?([^ ]*bash )?(.*animated-runner\.sh) slot [0-9]+$/\3/p')
+    script=$(ps -o args= -p "$pid" 2>/dev/null | sed -nE 's/^(caffeinate -i )?([^ ]*bash )?(.*animated-runner\.sh) slot [0-9]+$/\3/p' || true)
     [[ -n $script ]] || continue
     # start launches the slots as "$0", so a relative path is relative to the folder start ran in.
-    [[ $script == /* ]] || script="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')/$script"
+    [[ $script == /* ]] || script="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' || true)/$script"
+    # A slot's short-lived children, and other commands that mention the pattern, match too. Only a real script is a slot.
+    [[ -f $script ]] || continue
     printf '%s\t%s\t%s\n' "$pid" "$script" "$(sed -n 's/^REPO=//p' "$script" 2>/dev/null)"
   done
 }
@@ -56,7 +58,7 @@ case "${1:-}" in
       # caffeinate holds off idle sleep while the slot runs. A sleeping Mac freezes the runner, and GitHub fails its job.
       nohup caffeinate -i "$0" slot "$n" >>"$LOGS/$n.log" 2>&1 &
     done
-    runner_online 90 || { echo "No animated-runner came online on $REPO within 90 s. Read the slot logs in $LOGS and check that Docker Desktop runs." >&2; exit 1; }
+    runner_online 90 || { echo "No animated-runner came online on $REPO within 90 s. The slots keep trying, and a first image pull can take longer. Read the slot logs in $LOGS and check that Docker Desktop runs." >&2; exit 1; }
     ;;
   stop)
     pkill -f 'animated-runner\.sh slot' || true
