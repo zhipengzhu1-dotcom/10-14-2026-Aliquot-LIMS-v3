@@ -15,6 +15,7 @@ import {
   TEST_SELECT, TEST_QUEUES, TEST_RULES, SAMPLE_SELECT, SAMPLE_QUEUES, SAMPLE_RULES, TEST_OPEN, getTest, isQualified, instrumentProblem, materialProblem, refreshSampleStatus,
   unassignedTests, assignTests, claimTest, startTest, saveResults, submitTest, reviewTest, approveTest, cancelTest, issueReport, cancelSample,
 } from '../workflow.js';
+import { intakeHistory } from '../intake-values.js';
 import { INVESTIGATION_RULES } from '../investigations.js';
 import { PROJECT_RULES } from './business.js';
 import { ENTRY_QUEUES, ENTRY_RULES } from '../notebook.js';
@@ -245,6 +246,7 @@ export default function routes(r) {
       investigations: all(`SELECT id, code, type, title, status, severity FROM investigations WHERE sample_id = ? ORDER BY id DESC`, id),
       signatures: all(`SELECT * FROM signatures WHERE entity = 'samples' AND entity_id = ? ORDER BY id`, id),
       details: JSON.parse(get('SELECT details FROM sample_details WHERE sample_id = ?', id)?.details ?? '[]'),
+      intake: intakeHistory(sample),
       can: flags(SAMPLE_RULES, sample, ctx.user),
     };
   });
