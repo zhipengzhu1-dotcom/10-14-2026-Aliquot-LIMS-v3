@@ -36,6 +36,10 @@ _Avoid_: Procedure, assay, SOP
 One application of a Method to one Sample, carried from assignment through performed, reviewed and approved. Belongs to the Samples module: Worklist and Reviews & approvals are queues of Tests, not their owners.
 _Avoid_: Analysis, job
 
+**Intake review**:
+The decision, taken per Sample between receipt and assignment, whether the lab will test it: accept it, put it on hold with a reason, or reject it with a reason. Until a Sample is accepted its Tests cannot be assigned. A Sample waiting for the decision is Pending review.
+_Avoid_: Triage, login review, accessioning
+
 **Investigation**:
 A quality inquiry raised against a Test, a Sample or another record, of whatever type: OOS, out of trend, deviation, lab incident or client complaint. While one is open on a Test, the Test cannot be approved or cancelled. While one is open on a Sample or any of its Tests, the Sample cannot be certified, cancelled or disposed. Someone independent of the analyst closes it with a root cause and conclusion.
 _Avoid_: CAPA (one stage of an Investigation), ticket
