@@ -2,7 +2,7 @@
 
 import { all, get, ph } from '../db.js';
 import { can } from '../auth.js';
-import { SAMPLE_OPEN, rolesWith } from '../lookups.js';
+import { SAMPLE_OPEN, INTAKE_ACCEPTED, rolesWith } from '../lookups.js';
 import { today, addDays, now, localDate } from '../util.js';
 import { queued } from '../http.js';
 import { TEST_SELECT, TEST_EDITABLE, TEST_OPEN, TEST_QUEUES, TEST_RULES, TEST_RETURNED } from '../workflow.js';
@@ -43,12 +43,12 @@ export default function routes(r) {
       (SELECT COUNT(*) FROM tests WHERE status IN (${ph(TEST_OPEN)}) AND due_date < ?) AS tests_overdue,
       (SELECT COUNT(*) FROM tests WHERE status = 'Submitted') AS awaiting_review,
       (SELECT COUNT(*) FROM tests WHERE status = 'Reviewed') AS awaiting_approval,
-      (SELECT COUNT(*) FROM tests WHERE analyst_id IS NULL AND status = 'Pending') AS unassigned,
+      (SELECT COUNT(*) FROM tests t JOIN samples s ON s.id = t.sample_id WHERE t.analyst_id IS NULL AND t.status = 'Pending' AND s.intake = ?) AS unassigned,
       (SELECT COUNT(*) FROM investigations v WHERE ${INVESTIGATION_OPEN}) AS open_investigations,
       (SELECT COUNT(*) FROM samples WHERE reported_at >= ?) AS reported_90d,
       (SELECT COUNT(*) FROM samples WHERE reported_at >= ? AND substr(reported_at, 1, 10) <= due_date) AS on_time_90d,
       (SELECT AVG(julianday(reported_at) - julianday(received_at)) FROM samples WHERE reported_at >= ?) AS avg_tat_90d`,
-    ...SAMPLE_OPEN, new Date(Date.parse(`${addDays(t, -7)}T00:00:00`)).toISOString(), ...TEST_EDITABLE, ...TEST_OPEN, t, since90, since90, since90);
+    ...SAMPLE_OPEN, new Date(Date.parse(`${addDays(t, -7)}T00:00:00`)).toISOString(), ...TEST_EDITABLE, ...TEST_OPEN, t, INTAKE_ACCEPTED, since90, since90, since90);
 
     if (money) {
       const monthStart = `${t.slice(0, 7)}-01`;

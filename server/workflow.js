@@ -10,7 +10,7 @@ import { all, get, run, ph, tx } from './db.js';
 import { update, mustGet } from './repo.js';
 import { bad, forbidden, guard } from './http.js';
 import { can, verifySignature, applySignature } from './auth.js';
-import { SAMPLE_OPEN, SIGNATURE_MEANINGS, INTAKE_ACCEPTED, priorityRank } from './lookups.js';
+import { SAMPLE_OPEN, SIGNATURE_MEANINGS, INTAKE_PENDING, INTAKE_HOLD, INTAKE_ACCEPTED, priorityRank } from './lookups.js';
 import { clean, nowIso, today, idList, round, sameValue, fixed, specText } from './util.js';
 import { openSampleInvestigation, openTestInvestigation, raiseInvestigation } from './investigations.js';
 
@@ -238,7 +238,15 @@ export const SAMPLE_RULES = {
 
 export const SAMPLE_QUEUES = {
   certificate: { rule: 'issue', stage: () => all(`${SAMPLE_SELECT} WHERE s.status = 'Approved' ORDER BY s.due_date, s.id`) },
+
+  // Intake review. `intake`: Receiving & Review's Pending review and On hold tabs, the Samples waiting for a decision.
+  // `ready`: its Ready to assign tab, accepted Samples that may still have Tests to assign.
+  intake: { rule: 'accept', stage: () => intakeStage([INTAKE_PENDING, INTAKE_HOLD]) },
+  ready: { rule: 'assign', stage: () => intakeStage([INTAKE_ACCEPTED]) },
 };
+
+/** The open Samples at intake state `states`, the most urgent first: due date, then priority. */
+const intakeStage = (states) => all(`${SAMPLE_SELECT} WHERE s.intake IN (${ph(states)}) AND s.status IN (${ph(SAMPLE_OPEN)}) ORDER BY s.due_date, ${priorityRank('s.priority')}, s.id`, ...states, ...SAMPLE_OPEN);
 
 /** The one way a Test's status changes: audited as a status change, with its Sample's status re-derived in the same transaction. */
 function changeStatus(ctx, t, patch, meta) {

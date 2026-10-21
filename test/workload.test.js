@@ -113,7 +113,9 @@ test('each analyst row agrees with the Tests list', async () => {
     assert.equal(a.due_week, dueWeekBy.get(a.id) || 0, `${a.full_name}: due in 7 days`);
   }
   assert.ok(w.analysts.some((a) => a.overdue > 0) && w.analysts.some((a) => a.due_week > 0), 'the demo lab has overdue and due-soon work to compare');
-  assert.equal(w.unassigned, open.filter((t) => t.analyst_id == null && t.status === 'Pending').length, 'unassigned');
+  // The Unassigned view and the count both leave out Tests on a Sample still waiting for intake review.
+  const unassignedList = await lab.priya.ok('GET', '/api/tests?scope=open&unassigned=1&limit=3000');
+  assert.equal(w.unassigned, unassignedList.filter((t) => t.status === 'Pending').length, 'unassigned');
 
   const performers = (await lab.priya.ok('GET', '/api/lookups')).testPerformerRoles;
   const expected = Object.values(lab.users).filter((u) => u.active && performers.includes(u.role)).map((u) => u.id).sort((x, y) => x - y);
@@ -213,7 +215,7 @@ test('the administrator oversees every work queue but cannot act on it', async (
   const blocked = await admin.req('POST', `/api/tests/${submitted[0].id}/review`, { decision: 'approve', password: PASSWORD });
   assert.equal(blocked.status, 403, 'seeing the queue is not signing it');
   assert.equal((await admin.ok('GET', `/api/tests/${submitted[0].id}`)).test.status, 'Submitted');
-  const [unassigned] = await admin.ok('GET', '/api/tests?scope=open&unassigned=1');
+  const unassigned = { id: await receive() };
   assert.equal((await admin.req('POST', '/api/tests/assign', { test_ids: [unassigned.id], analyst_id: lab.users['tom.fletcher'].id })).status, 403, 'nor assigning work');
 });
 
