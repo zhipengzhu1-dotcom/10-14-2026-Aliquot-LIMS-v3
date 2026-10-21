@@ -123,6 +123,16 @@ agent-browser wait --fn '!document.querySelector(".modal-backdrop")'
 
 **Check every click that should change something.** A click can report done and change nothing, most often in a fast chain straight after `open` or after filling a modal. After each such click, read the toast, the URL or the record through `api.mjs`. If nothing changed, run doctor, then retry the click once.
 
+**Catch a layout jump or an entrance animation.** Reproduce a "the page moves on load" report before changing CSS; a padding guess missed the real cause once (the portal's `rise` entrance animation slides each view about 7px). The reduced-motion setup above hides it, so probe with motion on (`agent-browser set media light`). Start the frame logger in the same `eval` that changes the route, then read it back. Wrap it in an IIFE: `agent-browser eval` takes no top-level `await`, and a top-level `const` redeclared across calls throws.
+
+```bash
+agent-browser set media light
+agent-browser eval '(()=>{window.__fr=[];const t=performance.now();(function f(){const m=document.querySelector("#main h1");if(m)window.__fr.push([Math.round(performance.now()-t),Math.round(m.getBoundingClientRect().top)]);if(performance.now()-t<1500)requestAnimationFrame(f)})();location.hash="#/submit";return 1})()'
+agent-browser wait 1800 && agent-browser eval 'JSON.stringify({frames:window.__fr.filter((_,i)=>i%4===0),anims:document.getAnimations().map(a=>a.animationName)})'
+```
+
+A top edge that changes across frames (proven live 2026-10-21: 114, 121, 117, 114 px on `#/submit`) is an animation, and `getAnimations()` names it. Layout shifts that happened on load are `performance.getEntriesByType("layout-shift")`. The portal is served with `X-Frame-Options: DENY`, so probe in the page itself, not in an iframe.
+
 **API read-back.** `scripts/api.mjs` signs in as a demo person and prints `{status, data}`; it exits 1 on HTTP ≥ 400. Use it to read the state a UI action should have changed, and to prove refusals:
 
 ```bash

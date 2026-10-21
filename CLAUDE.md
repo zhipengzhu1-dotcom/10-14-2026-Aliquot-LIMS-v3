@@ -5,6 +5,9 @@ LIMS and electronic lab notebook for contract analytical labs. Read `README.md` 
 ## Commands
 
 - `npm run dev`: development copy on http://localhost:3001 with its own `data-dev/` folder. Never point development at `data/`.
+- `PORT=3002 npm run dev`: a second development copy on another port. Before debugging a browser error on a port, check that the listener is this repo: `lsof -a -d cwd -p $(lsof -tiTCP:<port> -sTCP:LISTEN)` (another project's dev server can take :3001 after a reboot).
+- `/verify-lims`: check a UI change in the running app. Invoke it first; it carries the logins, the splash and animation waits and the feature maps. The Claude-in-Chrome browsers are other machines and cannot reach localhost, so leave them out.
+- CI queued or runner offline: `docs/ci-runner.md`. Run `scripts/animated-runner.sh status` from the `aliquot-ci-runner` worktree, never from the live copy.
 - `npm run check`: syntax-check every JavaScript file and refuse hand-written writes that bypass the audit trail and verify feature maps that name code that is gone.
 - `npm test`: end-to-end tests against a real server on a throwaway database.
 - Public demo down, Cloudflare error 1033, or publishing `main` to app/animated.nitrolims-demo.com: README "The public demo". It runs from a separate live clone, not this one.
