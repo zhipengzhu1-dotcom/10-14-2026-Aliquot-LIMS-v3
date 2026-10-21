@@ -590,4 +590,21 @@ export const MIGRATIONS = [
   CREATE TRIGGER sample_details_no_update BEFORE UPDATE ON sample_details BEGIN SELECT RAISE(ABORT, 'sample details are append-only'); END;
   CREATE TRIGGER sample_details_no_delete BEFORE DELETE ON sample_details BEGIN SELECT RAISE(ABORT, 'sample details are append-only'); END;
   `,
+  // 7: intake review. Where a received Sample stands before its Tests may be assigned: Pending review, On hold or
+  // Accepted. Separate from the derived Sample status. Samples that exist now were already being worked, so they are
+  // Accepted; receipt sets new ones to Pending review. intake_decisions keeps who decided what, when and why.
+  `
+  ALTER TABLE samples ADD COLUMN intake TEXT NOT NULL DEFAULT 'Accepted';
+  CREATE TABLE intake_decisions (
+    id INTEGER PRIMARY KEY,
+    sample_id INTEGER NOT NULL REFERENCES samples(id),
+    decision TEXT NOT NULL,
+    reason TEXT,
+    decided_by INTEGER NOT NULL REFERENCES users(id),
+    decided_at TEXT NOT NULL
+  );
+  CREATE INDEX idx_intake_decisions_sample ON intake_decisions(sample_id);
+  CREATE TRIGGER intake_decisions_no_update BEFORE UPDATE ON intake_decisions BEGIN SELECT RAISE(ABORT, 'intake decisions are append-only'); END;
+  CREATE TRIGGER intake_decisions_no_delete BEFORE DELETE ON intake_decisions BEGIN SELECT RAISE(ABORT, 'intake decisions are append-only'); END;
+  `,
 ];

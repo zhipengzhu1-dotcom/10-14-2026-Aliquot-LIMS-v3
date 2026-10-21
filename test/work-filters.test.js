@@ -77,6 +77,7 @@ async function receive(client = lab.acme) {
     client_id: client.id, sample_type: 'Drug Product', storage: 'Ambient (15–25 °C)', priority: 'One week',
     samples: [{ description: 'Work filter sample' }], method_ids: [lab.hplc.id],
   });
+  await priya.ok('POST', `/api/samples/${samples[0].id}/accept`);
   const detail = await priya.ok('GET', `/api/samples/${samples[0].id}`);
   return { id: samples[0].id, testId: detail.tests[0].id };
 }

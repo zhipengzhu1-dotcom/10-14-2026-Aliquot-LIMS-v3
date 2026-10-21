@@ -101,7 +101,7 @@ test('a version 5 database gains append-only sample details, and its audit trail
 
     const file = path.join(dataDir, 'aliquot.db');
     const v5 = new DatabaseSync(file);
-    v5.exec('DROP TABLE sample_details; PRAGMA user_version = 5');
+    v5.exec('DROP TABLE intake_decisions; ALTER TABLE samples DROP COLUMN intake; DROP TABLE sample_details; PRAGMA user_version = 5');
     v5.close();
     const before = snapshot(file);
     assert.equal(before.version, 5);
@@ -127,6 +127,65 @@ test('a version 5 database gains append-only sample details, and its audit trail
       assert.throws(() => db.prepare('DELETE FROM sample_details').run(), /sample details are append-only/);
     } finally {
       db.close();
+    }
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('a version 6 database gains intake review: every Sample is Accepted, stays assignable, and the audit trail still verifies', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aliquot-upgrade-v6-'));
+  const post = async (base, cookie, url, body) => {
+    const res = await fetch(base + url, {
+      method: 'POST', headers: { 'X-Requested-With': 'aliquot', 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(body),
+    });
+    return { res, data: await res.json() };
+  };
+  try {
+    let server = await startServer(dataDir);
+    assert.equal((await post(server.base, '', '/api/setup', { mode: 'demo' })).res.status, 200, server.log());
+    await server.stop();
+
+    const file = path.join(dataDir, 'aliquot.db');
+    const v6 = new DatabaseSync(file);
+    // The demo leaves its newest arrivals Pending review; once upgraded they must be assignable like every other Sample.
+    const waiting = v6.prepare(`SELECT t.id, m.code AS method_code FROM tests t JOIN samples s ON s.id = t.sample_id JOIN methods m ON m.id = t.method_id
+      WHERE s.intake = 'Pending review' AND t.analyst_id IS NULL AND t.status = 'Pending' ORDER BY t.id LIMIT 1`).get();
+    assert.ok(waiting, 'the demo lab has a Test on a Sample Pending review');
+    const qualified = v6.prepare(`SELECT u.id FROM qualifications q JOIN users u ON u.id = q.user_id
+      WHERE q.method_code = ? AND q.revoked = 0 AND u.active = 1 AND u.role IN ('analyst', 'scientist') ORDER BY u.id LIMIT 1`).get(waiting.method_code);
+    assert.ok(qualified, 'someone is qualified on that Method');
+    v6.exec('DROP TABLE intake_decisions; ALTER TABLE samples DROP COLUMN intake; PRAGMA user_version = 6');
+    v6.close();
+    const before = snapshot(file);
+    assert.equal(before.version, 6);
+
+    server = await startServer(dataDir);
+    try {
+      const after = snapshot(file);
+      assert.equal(after.version, MIGRATIONS.length);
+      assert.equal(after.counts.samples, before.counts.samples);
+      assert.equal(after.counts.intake_decisions, 0);
+
+      const db = new DatabaseSync(file, { readOnly: true });
+      try {
+        assert.equal(db.prepare("SELECT COUNT(*) AS n FROM samples WHERE intake != 'Accepted'").get().n, 0, 'every existing Sample is Accepted');
+        const login = await post(server.base, '', '/api/auth/login', { username: 'priya.raman', password: 'demo1234' });
+        const cookie = login.res.headers.get('set-cookie').split(';')[0];
+        const assigned = await post(server.base, cookie, '/api/tests/assign', { test_ids: [waiting.id], analyst_id: qualified.id });
+        assert.equal(assigned.res.status, 200, `a Sample from before the upgrade is not held back by intake review: ${JSON.stringify(assigned.data)}`);
+      } finally {
+        db.close();
+      }
+    } finally {
+      await server.stop();
+    }
+
+    openDb(file);
+    try {
+      assert.ok(verifyChain().ok, 'audit trail verifies after the upgrade');
+    } finally {
+      closeDb();
     }
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });

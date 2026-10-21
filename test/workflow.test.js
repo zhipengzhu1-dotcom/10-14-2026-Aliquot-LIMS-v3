@@ -124,6 +124,7 @@ test('full workflow: receive → assign → results → review → approval → 
     method_ids: [kf.id, ftir.id],
   });
   assert.equal(received.samples.length, 2);
+  for (const s of received.samples) await priya.ok('POST', `/api/samples/${s.id}/accept`);
   const sample = await nadia.ok('GET', `/api/samples/${received.samples[0].id}`);
   assert.equal(sample.tests.length, 2);
   assert.equal(sample.sample.status, 'Received');
@@ -357,6 +358,7 @@ async function freshTest(methodCode, analystUsername) {
   const methods = await priya.ok('GET', '/api/methods?usable=1');
   const m = methods.find((x) => x.code === methodCode && x.status === 'Effective');
   const res = await priya.ok('POST', '/api/samples/receive', { client_id: clients[0].id, samples: [{ description: `Regression ${methodCode}` }], method_ids: [m.id] });
+  await priya.ok('POST', `/api/samples/${res.samples[0].id}/accept`);
   const sample = await priya.ok('GET', `/api/samples/${res.samples[0].id}`);
   const t = sample.tests[0];
   const users = await priya.ok('GET', '/api/users');
@@ -388,6 +390,7 @@ async function twoTestSample() {
   const ids = ['ATM-0001', 'ATM-0002'].map((code) => methods.find((x) => x.code === code && x.status === 'Effective').id);
   const res = await priya.ok('POST', '/api/samples/receive', { client_id: clients[0].id, samples: [{ description: 'Cancel under investigation' }], method_ids: ids });
   const sampleId = res.samples[0].id;
+  await priya.ok('POST', `/api/samples/${sampleId}/accept`);
   const [first] = (await priya.ok('GET', `/api/samples/${sampleId}`)).tests;
   await priya.ok('POST', `/api/tests/${first.id}/claim`);
   await priya.ok('POST', `/api/tests/${first.id}/start`);
@@ -568,6 +571,7 @@ test('the OOS investigation raised on submit takes the same defaults as one rais
   const kf = (await priya.ok('GET', '/api/methods?usable=1')).find((x) => x.code === 'ATM-0002' && x.status === 'Effective');
   const received = await priya.ok('POST', '/api/samples/receive', { client_id: project.client_id, project_id: project.id, samples: [{ description: 'OOS defaults' }], method_ids: [kf.id] });
   const sampleId = received.samples[0].id;
+  await priya.ok('POST', `/api/samples/${sampleId}/accept`);
   const testId = (await priya.ok('GET', `/api/samples/${sampleId}`)).tests[0].id;
   const users = await priya.ok('GET', '/api/users');
   await priya.ok('POST', '/api/tests/assign', { test_ids: [testId], analyst_id: users.find((u) => u.username === 'tom.fletcher').id });
@@ -967,6 +971,7 @@ test('a Test\'s history shows it invoiced, released and voided; analysts see the
   const project = await oliver.ok('POST', '/api/projects', { client_id: clients[0].id, title: 'Billing history', type: 'Routine / Release Testing' });
   const kf = (await priya.ok('GET', '/api/methods?usable=1')).find((m) => m.code === 'ATM-0002' && m.status === 'Effective');
   const received = await priya.ok('POST', '/api/samples/receive', { client_id: clients[0].id, project_id: project.id, samples: [{ description: 'Billing history' }], method_ids: [kf.id] });
+  await priya.ok('POST', `/api/samples/${received.samples[0].id}/accept`);
   const testId = (await priya.ok('GET', `/api/samples/${received.samples[0].id}`)).tests[0].id;
   const tomUser = (await priya.ok('GET', '/api/users')).find((u) => u.username === 'tom.fletcher');
   await priya.ok('POST', '/api/tests/assign', { test_ids: [testId], analyst_id: tomUser.id });
