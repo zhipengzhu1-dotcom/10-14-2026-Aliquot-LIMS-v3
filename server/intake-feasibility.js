@@ -36,7 +36,7 @@ function dueDateMet(s, m) {
   const earliest = addBusinessDays(today(), days);
   const ok = !s.due_date || s.due_date >= earliest;
   const need = `${m.code} takes ${days} working ${days === 1 ? 'day' : 'days'}, so the earliest finish is ${earliest}`;
-  return { ok, reason: `${s.priority}, due ${s.due_date}: ${need}, ${ok ? 'in time' : 'too late'}` };
+  return { ok, reason: `Priority ${s.priority}, due ${s.due_date}:${need}, ${ok ? 'in time' : 'too late'}` };
 }
 
 /** The feasibility indicators of each open Test requested on Sample `s` (a Sample row): [{ id, name, method_code, method_version, indicators }]. */
