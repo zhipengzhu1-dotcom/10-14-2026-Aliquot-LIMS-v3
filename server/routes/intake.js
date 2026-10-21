@@ -9,7 +9,7 @@ import { HttpError, bad, guard, flags, locks, queued } from '../http.js';
 import { INTAKE_PENDING, INTAKE_HOLD, INTAKE_ACCEPTED } from '../lookups.js';
 import { idList, nowIso, today } from '../util.js';
 import { SAMPLE_QUEUES, SAMPLE_RULES, cancelSampleAndTests } from '../workflow.js';
-import { postMessage } from './portal.js';
+import { longDate, postMessage } from './portal.js';
 
 /**
  * Records who decided what on Sample `s`, when and why, in one transaction with moving it to intake state `intake`.
@@ -36,7 +36,11 @@ export function tellClient(ctx, sample, body) {
 export function acceptSample(ctx, sampleId) {
   const s = mustGet('SELECT * FROM samples WHERE id = ?', sampleId, 'Sample');
   guard(SAMPLE_RULES.accept(s, ctx.user));
-  decide(ctx, s, 'Accepted', { intake: INTAKE_ACCEPTED, summary: 'Sample accepted at intake review' });
+  decide(ctx, s, 'Accepted', {
+    intake: INTAKE_ACCEPTED,
+    summary: 'Sample accepted at intake review',
+    also: () => tellClient(ctx, s, `${s.code} has been accepted and will be tested. Expected completion ${longDate(s.due_date)}.`),
+  });
   return { ok: true };
 }
 
