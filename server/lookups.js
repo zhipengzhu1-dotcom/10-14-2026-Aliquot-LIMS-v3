@@ -97,6 +97,11 @@ export const PRIORITY_TIERS = {
 /** The tiers new input may carry. */
 export const PRIORITIES = Object.keys(PRIORITY_TIERS).filter((k) => !PRIORITY_TIERS[k].retired);
 export const DEFAULT_PRIORITY = 'One week';
+/** The working days tier `priority` allows from receipt, for work whose slowest Method takes `tat` working days. */
+export const tierDays = (priority, tat) => {
+  const tier = PRIORITY_TIERS[priority];
+  return tier.days ?? tier.tatDays(tat);
+};
 /** SQL ranking `column` by tier urgency, for ORDER BY. */
 export const priorityRank = (column) => `CASE ${column} ${Object.entries(PRIORITY_TIERS).map(([k, t]) => `WHEN '${k}' THEN ${t.rank}`).join(' ')} ELSE 9 END`;
 // Where in the product's life a sample comes from, as the client's own sheet says it.

@@ -8,7 +8,7 @@ import { HttpError, bad, guard, flags, queued, workQueue } from '../http.js';
 import { assertCan } from '../auth.js';
 import { getNumber, labSettings } from '../settings.js';
 import {
-  SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, CUSTODY_ACTIONS, SAMPLE_OPEN, INTAKE_PENDING, INTAKE_ACCEPTED, priorityRank, rolesWith,
+  SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, tierDays, CUSTODY_ACTIONS, SAMPLE_OPEN, INTAKE_PENDING, INTAKE_ACCEPTED, priorityRank, rolesWith,
 } from '../lookups.js';
 import { clean, cleanAll, nowIso, today, addBusinessDays, dateOf, idList, likeTerm, limitParam, round } from '../util.js';
 import {
@@ -41,9 +41,8 @@ function priceFor(method, priority) {
 }
 
 export function defaultDueDate(fromDate, methods, priority) {
-  const tier = PRIORITY_TIERS[priority];
   const tat = methods.length ? Math.max(...methods.map((m) => m.tat_days || 5)) : 10;
-  return addBusinessDays(fromDate, tier.days ?? tier.tatDays(tat));
+  return addBusinessDays(fromDate, tierDays(priority, tat));
 }
 
 export function createTest(ctx, sample, method, { due, priority }) {

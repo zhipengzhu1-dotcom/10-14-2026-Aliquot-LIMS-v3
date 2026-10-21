@@ -118,14 +118,29 @@ test('each requested Test is listed with its Method and the three indicators, ea
   assert.equal(typeof qualified.count, 'number');
 });
 
-test('a Method in effect, in validation or in development is usable, as it is for requesting a Test', async () => {
+test('only a Method in effect is usable: In Development and In Validation are flagged with the status they are in', async () => {
   const dev = await makeMethod();
+  const validating = await makeMethod();
+  await setStatus(validating, 'In Validation');
   const eff = await makeMethod({ status: 'Effective' });
   const [a] = await indicatorsOf(await receive([dev]));
+  const [v] = await indicatorsOf(await receive([validating]));
   const [b] = await indicatorsOf(await receive([eff]));
-  assert.equal(a.method_usable.ok, true);
+  assert.equal(a.method_usable.ok, false);
+  assert.match(a.method_usable.reason, /in development/i);
+  assert.equal(v.method_usable.ok, false);
+  assert.match(v.method_usable.reason, /in validation/i);
   assert.equal(b.method_usable.ok, true);
   assert.match(b.method_usable.reason, /in effect/i);
+});
+
+test('requesting a Test still accepts a Method in development or validation: the indicator is stricter than the request check', async () => {
+  const dev = await makeMethod();
+  const id = await receive([dev]);
+  const [t] = (await review(id)).tests;
+  assert.ok(t.id, 'the Test was requested although its Method is not yet in effect');
+  const add = await (await staff('priya.raman')).req('POST', `/api/samples/${id}/tests`, { method_ids: [(await makeMethod()).id] });
+  assert.equal(add.status, 200);
 });
 
 test('a Test whose Method has since been retired is flagged as not usable, with the reason', async () => {
@@ -136,6 +151,13 @@ test('a Test whose Method has since been retired is flagged as not usable, with 
   assert.equal(t.indicators.method_usable.ok, false);
   assert.match(t.indicators.method_usable.reason, /retired/i);
   assert.ok(t.indicators.method_usable.reason.includes(m.code), 'the reason names the Method');
+});
+
+test('a Method in effect without anyone qualified is usable but flagged for lack of an analyst', async () => {
+  const m = await makeMethod({ status: 'Effective' });
+  const [i] = await indicatorsOf(await receive([m]));
+  assert.equal(i.method_usable.ok, true);
+  assert.equal(i.qualified.ok, false);
 });
 
 test('a Test whose Method has gone back to Draft is flagged as not usable', async () => {
@@ -154,7 +176,7 @@ test('a Test whose Method nobody is qualified on is flagged with a count of zero
   assert.equal(i.qualified.count, 0);
   assert.equal(i.qualified.ok, false);
   assert.match(i.qualified.reason, /no (one|analyst)|nobody/i);
-  assert.equal(i.method_usable.ok, true, 'a usable Method can still lack an analyst');
+  assert.equal(i.method_usable.ok, false, 'a Method still in development is not usable');
 
   await qualify(lab.tom, m.code);
   [i] = await indicatorsOf(id);
@@ -205,6 +227,30 @@ test('the due date is judged for the Sample\'s priority: Same day cannot be met 
 
   const oneWeek = await receive([m], { priority: 'One week' });
   assert.equal((await indicatorsOf(oneWeek))[0].due_date.ok, true, 'a week is enough for a three-day Method');
+});
+
+test('the reason names the tier with its working days, the Method turnaround and the due date, each clearly separated', async () => {
+  const m = await makeMethod({ tat_days: 3 });
+  const id = await receive([m], { priority: '3 days', due_date: dateIn(30) });
+  const [i] = await indicatorsOf(id);
+  assert.match(i.due_date.reason, /3 days/);
+  assert.match(i.due_date.reason, /3 working days/);
+  assert.match(i.due_date.reason, new RegExp(`due ${dateIn(30)}[,;.] `), 'the due date is followed by a separator, not run into the next clause');
+  assert.doesNotMatch(i.due_date.reason, /\d:\S/, 'no colon is run into the text after it');
+});
+
+test('without a due date the priority tier decides: Same day is not met by a three-day Method, One week is', async () => {
+  const priya = await staff('priya.raman');
+  const m = await makeMethod({ tat_days: 3 });
+  const rush = await receive([m], { priority: 'Same day' });
+  const week = await receive([m], { priority: 'One week' });
+  for (const id of [rush, week]) await priya.ok('PUT', `/api/samples/${id}`, { due_date: '' });
+  const [r] = await indicatorsOf(rush);
+  const [w] = await indicatorsOf(week);
+  assert.equal(r.due_date.ok, false);
+  assert.match(r.due_date.reason, /same day/i);
+  assert.equal(w.due_date.ok, true);
+  assert.match(w.due_date.reason, /one week/i);
 });
 
 test('a cancelled Test is no longer listed', async () => {
