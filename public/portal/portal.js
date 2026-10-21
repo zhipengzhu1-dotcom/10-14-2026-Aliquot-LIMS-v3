@@ -758,6 +758,14 @@ function provClass(path) {
   return [problemAt(path) ? 'p-ask' : '', p ? `p-${p.source}` : ''].filter(Boolean).join(' ');
 }
 
+/** What a table cell says on hover, where there is no room for a tag: the problem, else the provenance, else nothing. */
+function provTitle(path) {
+  const problem = problemAt(path);
+  if (problem) return problem.message;
+  const p = desk.draft.provenance[path];
+  return p ? `${SOURCES[p.source].tag}: ${p.reason || SOURCES[p.source].help}` : '';
+}
+
 function provTag(path) {
   const problem = problemAt(path);
   if (problem) return html`<span class="ptag ask" title="${problem.message}">needs you</span>`;
@@ -802,9 +810,7 @@ function samplesTable(d) {
       <td class="muted">${i + 1}</td>
       ${fields.map(([k, l, kind]) => {
         const path = `samples.${i}.${k}`;
-        const p = d.provenance[path];
-        const problem = problemAt(path);
-        return html`<td class="as-f ${provClass(path)}" data-field="${path}" title="${problem?.message ?? (p ? `${SOURCES[p.source].tag}: ${p.reason || SOURCES[p.source].help}` : '')}">${control(path, kind, `${l}, sample ${i + 1}`)}</td>`;
+        return html`<td class="as-f ${provClass(path)}" data-field="${path}" title="${provTitle(path)}">${control(path, kind, `${l}, sample ${i + 1}`)}</td>`;
       })}
       <td><button class="btn btn-quiet btn-sm" type="button" data-remove="${i}" aria-label="${`Remove sample ${i + 1}`}" ${desk.busy ? raw('disabled') : ''}>${ic('x', 15)}</button></td>
     </tr>${row.details?.length ? html`<tr class="as-xrow"><td colspan="${fields.length + 2}">${details(row)}</td></tr>` : ''}`)}</tbody></table></div>`;
@@ -932,6 +938,7 @@ function mountDesk(root) {
       el.className = `as-f ${provClass(path)}`;
       const tag = $('.js-tag', el);
       if (tag) tag.innerHTML = String(provTag(path));
+      else el.title = provTitle(path);
     });
     renderTabs();
   };
