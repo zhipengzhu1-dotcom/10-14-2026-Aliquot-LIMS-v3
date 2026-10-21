@@ -660,19 +660,6 @@ form.card { counter-reset: step; }
 .as-off { display: flex; gap: 12px; align-items: flex-start; padding: 4px 2px; color: var(--ink-2); }
 .as-off p { margin-top: 4px; font-size: 14px; }
 
-.as-cols { display: grid; }
-@media (min-width: 640px) { .as-cols { grid-template-columns: 1fr 1fr; } .as-cols > section + section { border-left: 1px solid var(--line); } }
-.as-cols > section { padding: 14px 18px 16px; min-width: 0; }
-@media (max-width: 639px) { .as-cols > section + section { border-top: 1px solid var(--line); } }
-.as-cols h3 { margin-bottom: 8px; }
-.as-list { list-style: none; margin: 0 0 10px; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
-.as-list li { display: grid; gap: 4px; padding-left: 10px; font-size: 13px; border-left: 3px solid var(--line-strong); }
-.as-list li > span { color: var(--muted); }
-.as-list li .btn, .as-list li .pill { justify-self: start; }
-.as-list li.ask { border-left-color: var(--signal); }
-.as-list li.fixed { border-left-color: var(--info); }
-.as-list li.guess { border-left: 3px dashed var(--warn); }
-
 .as-form .slip-sec h2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .as-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px 14px; }
 .as-f { display: flex; flex-direction: column; gap: 5px; min-width: 0; }

@@ -1,11 +1,10 @@
 // A client's sample sheet, pasted from Excel or read from a .csv, becomes a grid; a guessed column mapping the client
-// may change reads it into sample rows with per-cell problems and extra detail, and the Test column ticks one set of
-// the offered tests.
+// may change reads it into sample rows with per-cell problems and extra detail.
 // Run with:  node --test test/sheet.test.js
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { gridFromText, guessMapping, remap, withHeader, dropRows, readSheet, planTests, PORTAL_FIELDS, LAB_FIELDS } from '../public/portal/sheet.js';
+import { gridFromText, guessMapping, remap, withHeader, dropRows, readSheet, PORTAL_FIELDS, LAB_FIELDS } from '../public/portal/sheet.js';
 
 // What Excel puts on the clipboard: tabs between cells, CRLF between rows, a quoted cell where it holds a line break,
 // a tab or a quote, and a trailing empty line.
@@ -18,13 +17,6 @@ const EXCEL = [
   '',
   '',
 ].join('\r\n');
-
-const METHODS = [
-  { id: 2, code: 'ATM-0002', title: 'Water Content by Volumetric Karl Fischer Titration', technique: 'Karl Fischer' },
-  { id: 1, code: 'ATM-0001', title: 'Assay and Related Substances of Metformin HCl Tablets by HPLC-UV', technique: 'HPLC-UV' },
-  { id: 10, code: 'ATM-0010', title: 'Assay of Ibuprofen 400 mg Tablets by HPLC-UV', technique: 'HPLC-UV' },
-  { id: 6, code: 'ATM-0006', title: 'Identification by FTIR (ATR)', technique: 'FTIR' },
-];
 
 const read = (text, fields = PORTAL_FIELDS) => {
   const grid = gridFromText(text, 'paste');
@@ -39,20 +31,20 @@ test('an Excel copy with the client’s seven headings', () => {
       header: true,
       columns: [
         { label: 'Product Code', use: 'product_code' }, { label: 'Product Name', use: 'description' }, { label: 'Lot#', use: 'batch_no' },
-        { label: 'Status', use: 'stage' }, { label: 'Urgency', use: 'priority' }, { label: 'Test requested', use: 'test' }, { label: 'Quantity', use: 'quantity' },
+        { label: 'Status', use: 'stage' }, { label: 'Urgency', use: 'priority' }, { label: 'Test requested', use: 'tests_requested' }, { label: 'Quantity', use: 'quantity' },
       ],
     },
     rows: [
-      { problems: {}, details: [], product_code: 'MF500', description: 'Metformin HCl 500 mg', batch_no: 'MF-2701', stage: 'Stability', priority: 'Same day', test: 'Water', quantity: '100' },
-      { problems: {}, details: [], product_code: 'MF500', description: 'Metformin HCl 500 mg "film-coated"', batch_no: 'MF-2702', stage: 'Finished product', priority: 'One week', test: 'Karl Fischer', quantity: '60' },
-      { problems: {}, details: [], product_code: 'IBU400', description: 'Ibuprofen 400 mg', batch_no: 'B\t12', stage: 'R&D', priority: 'Next day', test: 'ATM-0002', quantity: '30' },
+      { problems: {}, details: [], product_code: 'MF500', description: 'Metformin HCl 500 mg', batch_no: 'MF-2701', stage: 'Stability', priority: 'Same day', tests_requested: 'Water', quantity: '100' },
+      { problems: {}, details: [], product_code: 'MF500', description: 'Metformin HCl 500 mg "film-coated"', batch_no: 'MF-2702', stage: 'Finished product', priority: 'One week', tests_requested: 'Karl Fischer', quantity: '60' },
+      { problems: {}, details: [], product_code: 'IBU400', description: 'Ibuprofen 400 mg', batch_no: 'B\t12', stage: 'R&D', priority: 'Next day', tests_requested: 'ATM-0002', quantity: '30' },
       {
         problems: {
           stage: '"frozen" is not a stage we know. Use Stability, R&D, Finished product, Initial, Bulk hold, Other.',
           priority: '"soonish" is not a turnaround we know. Use Same day, Next day, 3 days, One week.',
         },
-        details: [],
-        product_code: 'IBU400', description: 'Ibuprofen 400 mg', batch_no: 'B-13', stage: null, priority: null, test: 'Water', quantity: '30',
+        details: [{ label: 'Status', value: 'frozen' }, { label: 'Urgency', value: 'soonish' }],
+        product_code: 'IBU400', description: 'Ibuprofen 400 mg', batch_no: 'B-13', stage: null, priority: null, tests_requested: 'Water', quantity: '30',
       },
     ],
   });
@@ -97,16 +89,16 @@ test('no heading row: the client’s column order, a missing name flagged, colum
       header: false,
       columns: [
         { label: 'Column A', use: 'product_code' }, { label: 'Column B', use: 'description' }, { label: 'Column C', use: 'batch_no' }, { label: 'Column D', use: 'stage' },
-        { label: 'Column E', use: 'priority' }, { label: 'Column F', use: 'test' }, { label: 'Column G', use: 'quantity' },
+        { label: 'Column E', use: 'priority' }, { label: 'Column F', use: 'tests_requested' }, { label: 'Column G', use: 'quantity' },
       ],
     },
     rows: [
-      { problems: {}, details: [], product_code: 'MF500', description: 'Metformin', batch_no: 'MF-1', stage: 'Bulk hold', priority: '3 days', test: 'Water', quantity: '10' },
+      { problems: {}, details: [], product_code: 'MF500', description: 'Metformin', batch_no: 'MF-1', stage: 'Bulk hold', priority: '3 days', tests_requested: 'Water', quantity: '10' },
       { problems: { description: 'Every sample needs a name.' }, details: [], product_code: 'MF500', batch_no: 'MF-2', stage: 'Initial', priority: 'Same day', quantity: '5' },
     ],
   });
   assert.deepEqual(uses(read('a\tb\tc\td\te\tf\tg\th\ti\tj\tk').mapping),
-    ['product_code', 'description', 'batch_no', 'stage', 'priority', 'test', 'quantity', 'client_ref', 'container', 'extra', 'extra']);
+    ['product_code', 'description', 'batch_no', 'stage', 'priority', 'tests_requested', 'quantity', 'client_ref', 'container', 'limits', 'extra']);
 });
 
 test('one name per line still works, and a first line that looks like a heading is a sample (#17)', () => {
@@ -163,22 +155,35 @@ test('rows that did not fit stay as a sheet, headings kept', () => {
   assert.deepEqual(dropRows(grid.slice(1), withHeader(grid.slice(1), m, false), 1), [['B', ''], ['C', 'z']]);
 });
 
-test('the Test column ticks the one test every row names, by title, words or code', () => {
-  const { rows } = read(EXCEL);
-  assert.deepEqual(planTests(rows, METHODS), { methodIds: [2], problem: null });
-  assert.deepEqual(rows.map((r) => r.problems.test), [undefined, undefined, undefined, undefined]);
+test('Tests requested stays as the client wrote it, whether or not the lab offers that test', () => {
+  const { rows } = read('Name\tTest\nA\tWater\nB\tFTIR, water\nC\tNitrosamines');
+  assert.deepEqual(rows.map((r) => [r.tests_requested, r.problems.tests_requested]), [['Water', undefined], ['FTIR, water', undefined], ['Nitrosamines', undefined]]);
 });
 
-test('rows naming different tests, an unknown test and an ambiguous one are flagged', () => {
-  const { rows } = read('Name\tTest\nA\tWater\nB\tFTIR, water\nC\tNitrosamines\nD\tAssay');
-  assert.deepEqual(planTests(rows, METHODS), {
-    methodIds: [],
-    problem: 'These rows ask for different tests. Tests apply to every sample in a shipment, so send rows with different tests as separate submissions.',
-  });
-  assert.deepEqual(rows.map((r) => r.problems.test), [
-    undefined,
-    undefined,
-    '"Nitrosamines" matches none of the tests offered.',
-    '"Assay" could be Assay and Related Substances of Metformin HCl Tablets by HPLC-UV or Assay of Ibuprofen 400 mg Tablets by HPLC-UV. Tick the right test below.',
-  ]);
+// The lab's Sample Submission Log, as Excel copies it: a No. column, TYPE with its legend, a starred TAT in days.
+const LOG = [
+  'No.\tSAMPLE DESCRIPTION\tTYPE (FP/IP/RM/R&D, Stab. Condition)\t*TAT #\tLOT NUMBER\tPRODUCT CODE\tTESTS REQUESTED\tLIMITS',
+  '1\tAcetaminophen 500mg Tablet\tFP\t1\tR00001\t1234\tNitrosamine Impurity by LC-MS\t<26.5ng/day',
+].join('\r\n');
+
+test('the Sample Submission Log fills every column of the form, and its numbering column is ignored', () => {
+  const { mapping, rows } = read(LOG);
+  assert.deepEqual(uses(mapping), ['ignore', 'description', 'stage', 'priority', 'batch_no', 'product_code', 'tests_requested', 'limits']);
+  assert.deepEqual(rows, [{
+    problems: {}, details: [], description: 'Acetaminophen 500mg Tablet', stage: 'Finished product', priority: 'Next day',
+    batch_no: 'R00001', product_code: '1234', tests_requested: 'Nitrosamine Impurity by LC-MS', limits: '<26.5ng/day',
+  }]);
+});
+
+test('a bare Type or Sample type column and an Item column stay as the client’s detail, never read as stage or a row number', () => {
+  const { mapping, rows } = read('Description\tBatch\tSample type\tItem\nAspirin\tB1\tDrug Product\tTablet 100mg', LAB_FIELDS);
+  assert.deepEqual(uses(mapping), ['description', 'batch_no', 'extra', 'extra']);
+  assert.deepEqual(rows[0].details, [{ label: 'Sample type', value: 'Drug Product' }, { label: 'Item', value: 'Tablet 100mg' }]);
+});
+
+test('a type or turnaround we have no value for is flagged and kept as detail, not lost', () => {
+  const { rows } = read(LOG.replace('\tFP\t1\t', '\tIP\t2\t'));
+  assert.deepEqual(rows[0].details, [{ label: 'TYPE (FP/IP/RM/R&D, Stab. Condition)', value: 'IP' }, { label: '*TAT #', value: '2' }]);
+  assert.deepEqual([rows[0].stage, rows[0].priority], [null, null]);
+  assert.equal(Object.keys(rows[0].problems).length, 2);
 });

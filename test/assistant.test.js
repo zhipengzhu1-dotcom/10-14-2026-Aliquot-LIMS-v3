@@ -76,7 +76,7 @@ function fake(replies, { signedIn = true } = {}) {
 const calls = () => (fs.existsSync(path.join(fakeDir, 'calls.jsonl')) ? fs.readFileSync(path.join(fakeDir, 'calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
 const prompts = () => calls().filter((c) => 'input' in c);
 
-const row = (batch, extra = {}) => ({ description: 'Paracetamol 500mg tablet', product_code: null, batch_no: batch, client_ref: null, quantity: null, container: null, stage: 'Finished product', priority: null, details: [], ...extra });
+const row = (batch, extra = {}) => ({ description: 'Paracetamol 500mg tablet', product_code: null, batch_no: batch, client_ref: null, quantity: null, container: null, stage: 'Finished product', priority: null, tests_requested: null, limits: null, details: [], ...extra });
 const answer = (draft, { provenance = {}, questions = [], reply = 'I drafted the shipment.' } = {}) => ({
   output: { reply, draft: { samples: [], ...draft }, provenance, questions },
 });
