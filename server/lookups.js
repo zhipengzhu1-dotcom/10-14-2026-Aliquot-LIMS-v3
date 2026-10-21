@@ -16,7 +16,6 @@ export const PERMISSIONS = {
   'samples.edit': ['admin', 'manager', 'scientist', 'analyst'],
   'samples.dispose': ['admin', 'manager', 'qa'],
   'tests.assign': ['manager', 'scientist'],
-  // Intake review: deciding whether a received Sample is accepted before its Tests are assigned.
   'samples.review': ['manager', 'scientist'],
   'tests.perform': ['manager', 'scientist', 'analyst'],
   'tests.review': ['manager', 'scientist', 'qa'],
@@ -97,6 +96,11 @@ export const PRIORITY_TIERS = {
 /** The tiers new input may carry. */
 export const PRIORITIES = Object.keys(PRIORITY_TIERS).filter((k) => !PRIORITY_TIERS[k].retired);
 export const DEFAULT_PRIORITY = 'One week';
+/** The working days tier `priority` allows from receipt, for work whose slowest Method takes `tat` working days. */
+export const tierDays = (priority, tat) => {
+  const tier = PRIORITY_TIERS[priority];
+  return tier.days ?? tier.tatDays(tat);
+};
 /** SQL ranking `column` by tier urgency, for ORDER BY. */
 export const priorityRank = (column) => `CASE ${column} ${Object.entries(PRIORITY_TIERS).map(([k, t]) => `WHEN '${k}' THEN ${t.rank}`).join(' ')} ELSE 9 END`;
 // Where in the product's life a sample comes from, as the client's own sheet says it.
@@ -107,6 +111,11 @@ export const SAMPLE_STATUSES = ['Received', 'In Testing', 'In Review', 'Approved
 export const INTAKE_PENDING = 'Pending review';
 export const INTAKE_HOLD = 'On hold';
 export const INTAKE_ACCEPTED = 'Accepted';
+/** What a record in `intake_decisions` says was decided. Rejecting leaves the intake state alone and cancels the Sample. */
+export const DECISION_ACCEPTED = 'Accepted';
+export const DECISION_HELD = 'Held';
+export const DECISION_RELEASED = 'Released';
+export const DECISION_REJECTED = 'Rejected';
 export const SAMPLE_OPEN = ['Received', 'In Testing', 'In Review', 'Approved'];
 export const CUSTODY_ACTIONS = ['Moved', 'Removed for testing', 'Returned to storage', 'Aliquoted', 'Returned to client', 'Disposed'];
 
@@ -178,6 +187,7 @@ export function lookups() {
     stages: STAGES,
     receiptConditions: RECEIPT_CONDITIONS,
     sampleStatuses: SAMPLE_STATUSES,
+    intakeStates: { pending: INTAKE_PENDING, hold: INTAKE_HOLD, accepted: INTAKE_ACCEPTED },
     custodyActions: CUSTODY_ACTIONS,
     testStatuses: TEST_STATUSES,
     investigationTypes: Object.keys(INVESTIGATION_TYPES),

@@ -8,7 +8,7 @@ import { HttpError, bad, guard, flags, queued, workQueue } from '../http.js';
 import { assertCan } from '../auth.js';
 import { getNumber, labSettings } from '../settings.js';
 import {
-  SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, CUSTODY_ACTIONS, SAMPLE_OPEN, INTAKE_PENDING, INTAKE_ACCEPTED, priorityRank, rolesWith,
+  SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, tierDays, CUSTODY_ACTIONS, SAMPLE_OPEN, INTAKE_PENDING, INTAKE_ACCEPTED, priorityRank, rolesWith,
 } from '../lookups.js';
 import { clean, cleanAll, nowIso, today, addBusinessDays, dateOf, idList, likeTerm, limitParam, round } from '../util.js';
 import {
@@ -16,6 +16,7 @@ import {
   unassignedTests, assignTests, claimTest, startTest, saveResults, submitTest, reviewTest, approveTest, cancelTest, issueReport, cancelSample,
 } from '../workflow.js';
 import { intakeHistory } from '../intake-values.js';
+import { acceptedWithChanges } from '../intake-changes.js';
 import { INVESTIGATION_RULES } from '../investigations.js';
 import { methodProblem } from '../intake-feasibility.js';
 import { PROJECT_RULES } from './business.js';
@@ -41,9 +42,8 @@ function priceFor(method, priority) {
 }
 
 export function defaultDueDate(fromDate, methods, priority) {
-  const tier = PRIORITY_TIERS[priority];
   const tat = methods.length ? Math.max(...methods.map((m) => m.tat_days || 5)) : 10;
-  return addBusinessDays(fromDate, tier.days ?? tier.tatDays(tat));
+  return addBusinessDays(fromDate, tierDays(priority, tat));
 }
 
 export function createTest(ctx, sample, method, { due, priority }) {
@@ -321,10 +321,12 @@ export default function routes(r) {
     const where = [];
     const params = [];
     if (q.scope === 'open') { where.push(`t.status IN (${ph(TEST_OPEN)})`); params.push(...TEST_OPEN); }
+    // Tests on a Sample still waiting for intake review are not work yet, so no list of open or late work shows them.
+    if (q.scope === 'open' || q.overdue) { where.push('s.intake = ?'); params.push(INTAKE_ACCEPTED); }
     if (q.status) { const list = String(q.status).split(','); where.push(`t.status IN (${ph(list)})`); params.push(...list); }
     if (q.work) { const ids = workFilter(ctx, q.work, 'id'); where.push(`t.id IN (${ph(ids)})`); params.push(...ids); }
     if (q.analyst_id) { where.push('t.analyst_id = ?'); params.push(+q.analyst_id); }
-    // Tests on a Sample still waiting for intake review cannot be assigned yet, so they are not unassigned work.
+    // Cannot be assigned until the Sample is accepted, so not yet unassigned work.
     if (q.unassigned) { where.push('t.analyst_id IS NULL AND s.intake = ?'); params.push(INTAKE_ACCEPTED); }
     if (q.method_id) { where.push('t.method_id = ?'); params.push(+q.method_id); }
     if (q.sample_id) { where.push('t.sample_id = ?'); params.push(+q.sample_id); }
@@ -372,6 +374,7 @@ export default function routes(r) {
         ORDER BY used_with_method DESC, i.category, i.name`, test.method_code, id).map((m) => ({ ...m, problem: materialProblem(m) })),
       analysts: all(`SELECT id, full_name, initials, role FROM users WHERE active = 1 AND role IN (${ph(performers)}) ORDER BY full_name`, ...performers)
         .map((u) => ({ ...u, qualified: isQualified(u.id, test.method_code) })),
+      intake_changes: acceptedWithChanges(test.sample_id),
       can: flags(TEST_RULES, test, me),
       qualifiedMe,
     };

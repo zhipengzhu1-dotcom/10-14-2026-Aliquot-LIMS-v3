@@ -8,15 +8,15 @@ import { icon } from '../core/icons.js';
 import { navigate, refreshNav, setQuery } from '../core/nav.js';
 import { askHoldReason } from './intake-hold.js';
 import {
-  pageHead, segmented, searchBox, priorityBadge, dueChip, fmtDateTime, plural, emptyState, badge, toast, showError, busy, confirmDialog, debounce, promptReason,
+  pageHead, segmented, searchBox, priorityBadge, dueChip, fmtDateTime, plural, emptyState, toast, showError, busy, confirmDialog, debounce, promptReason,
 } from '../core/ui.js';
 import { assignAction } from './intake-assign.js';
 import { openReview } from './intake-review.js';
+import { showOutcomes } from './intake-outcomes.js';
 
-// The tabs, in order. Each is a stage of intake; the server returns the Samples of the tab asked for.
-const TABS = [
-  { key: 'pending', label: 'Pending review' },
-  { key: 'hold', label: 'On hold' },
+const tabs = () => [
+  { key: 'pending', label: state.lookups.intakeStates.pending },
+  { key: 'hold', label: state.lookups.intakeStates.hold },
   { key: 'ready', label: 'Ready to assign' },
 ];
 
@@ -78,16 +78,9 @@ function groupCard(group, tab) {
   </section>`;
 }
 
-function outcomePanel(r, verb) {
-  const refused = r.results.filter((x) => !x.ok);
-  return html`<section class="card mb" data-outcomes><header class="card-head"><div><h2>${plural(r.accepted, 'sample')} ${verb}${refused.length ? `, ${refused.length} refused` : ''}</h2>
-    <p class="sub">Each sample was decided on its own, so a refusal does not stop the others.</p></div><div class="card-actions"><button class="btn sm ghost" data-dismiss>Dismiss</button></div></header>
-    <ul class="list">${r.results.map((x) => html`<li><div class="grow"><span class="code">${x.code ?? `#${x.id}`}</span> ${x.ok ? badge('Accepted', 'green') : badge('Refused', 'red')}
-      ${x.ok ? '' : html`<span class="sub-line">${x.error}</span>`}</div></li>`)}</ul></section>`;
-}
-
 export async function render(ctx) {
   ctx.title('Receiving & Review');
+  const TABS = tabs();
   const tab = TABS.some((t) => t.key === ctx.query.tab) ? ctx.query.tab : 'pending';
   const [clients, projects] = await Promise.all([api.get('/api/clients'), api.get('/api/projects')]);
   let search = ctx.query.q || '';
@@ -202,9 +195,7 @@ export async function render(ctx) {
         const r = await api.post(a.bulk.path, { sample_ids: ids });
         toast(`${plural(r.accepted, 'sample')} ${a.bulk.done}${r.refused ? `, ${r.refused} refused` : ''}`, r.refused ? 'info' : 'success');
         await after();
-        const outcomes = ctx.el.querySelector('[data-outcomes-host]');
-        outcomes.innerHTML = String(outcomePanel(r, a.bulk.done));
-        outcomes.querySelector('[data-dismiss]').addEventListener('click', () => { outcomes.innerHTML = ''; });
+        showOutcomes(outcomesHost(), { noun: 'sample', verb: a.bulk.done, done: 'Accepted', rows: r.results.map((x) => ({ label: x.code ?? `#${x.id}`, ok: x.ok, error: x.error })) });
       });
     }));
   }
