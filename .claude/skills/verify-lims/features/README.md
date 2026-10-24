@@ -6,6 +6,7 @@ One file per user-facing feature. Each says how a user reaches it, how to drive 
 |---|---|---|---|
 | Enter results and submit a test | [test-results.md](test-results.md) | analyst (tom.fletcher) | yes, 2026-10-18 |
 | Receive samples | [receive-samples.md](receive-samples.md) | analyst (tom.fletcher) | yes, 2026-10-18 |
+| Intake review: Receiving & Review Queue, accept (single and bulk), assign gate, assign from the screen | [intake-review.md](intake-review.md) | priya.raman or sarah.lindqvist (tom.fletcher refused) | yes, 2026-10-21 (Receiving & Review screen, accept, bulk accept, badge); assign dialog and per-Test outcomes: 2026-10-21 |
 | Peer review and QA approval, issue CoA | [review-approve.md](review-approve.md) | sarah.lindqvist, then daniel.okafor | yes, 2026-10-18 |
 | Lab notebook: write, sign, witness | [notebook.md](notebook.md) | tom.fletcher, then sarah.lindqvist | yes, 2026-10-18 |
 | Client portal | [client-portal.md](client-portal.md) | customer@example.com | yes, 2026-10-18 |

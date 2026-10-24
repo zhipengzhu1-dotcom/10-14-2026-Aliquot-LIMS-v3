@@ -8,14 +8,17 @@ import { HttpError, bad, guard, flags, queued, workQueue } from '../http.js';
 import { assertCan } from '../auth.js';
 import { getNumber, labSettings } from '../settings.js';
 import {
-  SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, CUSTODY_ACTIONS, METHOD_USABLE, SAMPLE_OPEN, priorityRank, rolesWith,
+  SAMPLE_TYPES, STORAGE_CONDITIONS, RECEIPT_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, tierDays, CUSTODY_ACTIONS, SAMPLE_OPEN, INTAKE_PENDING, INTAKE_ACCEPTED, priorityRank, rolesWith,
 } from '../lookups.js';
 import { clean, cleanAll, nowIso, today, addBusinessDays, dateOf, idList, likeTerm, limitParam, round } from '../util.js';
 import {
   TEST_SELECT, TEST_QUEUES, TEST_RULES, SAMPLE_SELECT, SAMPLE_QUEUES, SAMPLE_RULES, TEST_OPEN, getTest, isQualified, instrumentProblem, materialProblem, refreshSampleStatus,
   unassignedTests, assignTests, claimTest, startTest, saveResults, submitTest, reviewTest, approveTest, cancelTest, issueReport, cancelSample,
 } from '../workflow.js';
+import { intakeHistory } from '../intake-values.js';
+import { acceptedWithChanges } from '../intake-changes.js';
 import { INVESTIGATION_RULES } from '../investigations.js';
+import { methodProblem } from '../intake-feasibility.js';
 import { PROJECT_RULES } from './business.js';
 import { ENTRY_QUEUES, ENTRY_RULES } from '../notebook.js';
 
@@ -27,8 +30,8 @@ function loadUsableMethods(ids) {
   return ids.map((id) => {
     const m = get('SELECT * FROM methods WHERE id = ?', id);
     if (!m) throw bad('Unknown method selected');
-    if (!METHOD_USABLE.includes(m.status)) throw bad(`${m.code} v${m.version} is ${m.status.toLowerCase()} and cannot be used for testing`);
-    if (!get('SELECT 1 FROM method_analytes WHERE method_id = ?', m.id)) throw bad(`${m.code} has no result parameters defined yet`);
+    const problem = methodProblem(m);
+    if (problem) throw bad(problem);
     return m;
   });
 }
@@ -39,9 +42,8 @@ function priceFor(method, priority) {
 }
 
 export function defaultDueDate(fromDate, methods, priority) {
-  const tier = PRIORITY_TIERS[priority];
   const tat = methods.length ? Math.max(...methods.map((m) => m.tat_days || 5)) : 10;
-  return addBusinessDays(fromDate, tier.days ?? tier.tatDays(tat));
+  return addBusinessDays(fromDate, tierDays(priority, tat));
 }
 
 export function createTest(ctx, sample, method, { due, priority }) {
@@ -165,7 +167,7 @@ export function receiveSamples(ctx, body, { legacyTiers = false } = {}) {
     const code = nextCode('S');
     const due = dueFor(row.priority);
     const id = insert(ctx, 'samples', {
-      code, ...common, ...row, due_date: due, status: 'Received', received_by: ctx.user.id, created_at: nowIso(),
+      code, ...common, ...row, due_date: due, status: 'Received', intake: INTAKE_PENDING, received_by: ctx.user.id, created_at: nowIso(),
     }, { summary: 'Sample received' });
     if (details.length) insert(ctx, 'sample_details', { sample_id: id, details: JSON.stringify(details), created_at: nowIso() }, { code, summary: 'Client sheet details kept' });
     run(
@@ -245,6 +247,7 @@ export default function routes(r) {
       investigations: all(`SELECT id, code, type, title, status, severity FROM investigations WHERE sample_id = ? ORDER BY id DESC`, id),
       signatures: all(`SELECT * FROM signatures WHERE entity = 'samples' AND entity_id = ? ORDER BY id`, id),
       details: JSON.parse(get('SELECT details FROM sample_details WHERE sample_id = ?', id)?.details ?? '[]'),
+      intake: intakeHistory(sample),
       can: flags(SAMPLE_RULES, sample, ctx.user),
     };
   });
@@ -318,10 +321,13 @@ export default function routes(r) {
     const where = [];
     const params = [];
     if (q.scope === 'open') { where.push(`t.status IN (${ph(TEST_OPEN)})`); params.push(...TEST_OPEN); }
+    // Tests on a Sample still waiting for intake review are not work yet, so no list of open or late work shows them.
+    if (q.scope === 'open' || q.overdue) { where.push('s.intake = ?'); params.push(INTAKE_ACCEPTED); }
     if (q.status) { const list = String(q.status).split(','); where.push(`t.status IN (${ph(list)})`); params.push(...list); }
     if (q.work) { const ids = workFilter(ctx, q.work, 'id'); where.push(`t.id IN (${ph(ids)})`); params.push(...ids); }
     if (q.analyst_id) { where.push('t.analyst_id = ?'); params.push(+q.analyst_id); }
-    if (q.unassigned) where.push('t.analyst_id IS NULL');
+    // Cannot be assigned until the Sample is accepted, so not yet unassigned work.
+    if (q.unassigned) { where.push('t.analyst_id IS NULL AND s.intake = ?'); params.push(INTAKE_ACCEPTED); }
     if (q.method_id) { where.push('t.method_id = ?'); params.push(+q.method_id); }
     if (q.sample_id) { where.push('t.sample_id = ?'); params.push(+q.sample_id); }
     if (q.instrument_id) { where.push('t.instrument_id = ?'); params.push(+q.instrument_id); }
@@ -368,6 +374,7 @@ export default function routes(r) {
         ORDER BY used_with_method DESC, i.category, i.name`, test.method_code, id).map((m) => ({ ...m, problem: materialProblem(m) })),
       analysts: all(`SELECT id, full_name, initials, role FROM users WHERE active = 1 AND role IN (${ph(performers)}) ORDER BY full_name`, ...performers)
         .map((u) => ({ ...u, qualified: isQualified(u.id, test.method_code) })),
+      intake_changes: acceptedWithChanges(test.sample_id),
       can: flags(TEST_RULES, test, me),
       qualifiedMe,
     };

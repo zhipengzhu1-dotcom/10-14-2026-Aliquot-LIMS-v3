@@ -197,9 +197,19 @@ function hideSplash() {
 // Status vocabulary
 // ---------------------------------------------------------------------------------------------
 
-const SAMPLE_STAGE = { Received: 1, 'In Testing': 2, 'In Review': 3, Approved: 3, Reported: 4 };
-const SAMPLE_LABEL = { Received: 'Received', 'In Testing': 'Testing', 'In Review': 'In review', Approved: 'Finalising', Reported: 'Reported', Cancelled: 'Cancelled', Disposed: 'Closed' };
-const SAMPLE_TONE = { Received: 'info', 'In Testing': 'accent', 'In Review': 'accent', Approved: 'accent', Reported: 'ok', Cancelled: 'bad', Disposed: '' };
+// What the client reads for a Sample. While the lab's status is still Received the Sample is at intake review, so the
+// state the client reads comes from `intake` (awaiting review, on hold, accepted). A cancelled Sample, rejected or not,
+// has no intake state and reads from its status.
+const SAMPLE_STAGE = { Received: 1, 'Awaiting review': 1, 'On hold': 1, Accepted: 1, 'In Testing': 2, 'In Review': 3, Approved: 3, Reported: 4 };
+const SAMPLE_LABEL = { Received: 'Received', 'Awaiting review': 'Awaiting review', 'On hold': 'On hold', Accepted: 'Accepted', 'In Testing': 'Testing', 'In Review': 'In review', Approved: 'Finalising', Reported: 'Reported', Cancelled: 'Cancelled', Disposed: 'Closed' };
+const SAMPLE_TONE = { Received: 'info', 'Awaiting review': 'info', 'On hold': 'warn', Accepted: 'accent', 'In Testing': 'accent', 'In Review': 'accent', Approved: 'accent', Reported: 'ok', Cancelled: 'bad', Disposed: '' };
+const INTAKE_STATE = { 'Pending review': 'Awaiting review', 'On hold': 'On hold', Accepted: 'Accepted' };
+const sampleState = (s) => (s.status === 'Received' && INTAKE_STATE[s.intake]) || s.status;
+const SAMPLE_NOTE = {
+  'Awaiting review': 'The lab is checking this sample against what you sent. We will message you if we have a question.',
+  'On hold': 'We have paused this sample until we hear from you. Please reply to our question in your messages.',
+  Accepted: 'The lab has accepted this sample and testing will go ahead.',
+};
 // A submission's lifecycle as data: what the client reads for each status, whether it is still open, and the reason
 // shown when it stopped early. The timeline below ends at Received; after that the samples have their own progress.
 const SUBMISSION = {
@@ -217,7 +227,7 @@ const SUBMISSION_STEPS = [
 const REQ_TONE = { Submitted: 'info', 'Under review': 'accent', 'Proposal sent': 'warn', Accepted: 'ok', Declined: 'bad' };
 
 const pill = (label, tone = '') => html`<span class="pill ${tone}">${label}</span>`;
-const samplePill = (s) => pill(SAMPLE_LABEL[s] || s, SAMPLE_TONE[s]);
+const samplePill = (s) => { const k = sampleState(s); return pill(SAMPLE_LABEL[k] || k, SAMPLE_TONE[k]); };
 const subPill = (s) => pill(SUBMISSION[s].label, SUBMISSION[s].tone);
 const progress = (status) => {
   const n = SAMPLE_STAGE[status] || 0;
@@ -510,7 +520,7 @@ async function overview() {
               <div class="card-head"><h2>Samples in progress</h2><a class="small" href="#/samples">View all</a></div>
               ${o.inProgress.length ? html`<ul class="list">${o.inProgress.map((s) => html`<li><a class="item item-stack" href="${`#/samples/${s.id}`}">
                 <div class="grow"><div class="t ellipsis"><span class="mono">${s.code}</span> · ${s.description}</div><div class="s ellipsis">${[s.batch_no && `Batch ${s.batch_no}`, s.client_ref].filter(Boolean).join(' · ') || '—'}</div></div>
-                <div class="end">${progress(s.status)}<div class="progress-label">${SAMPLE_LABEL[s.status]} · due ${fmtDate(s.due_date)}</div></div>
+                <div class="end">${progress(sampleState(s))}<div class="progress-label">${SAMPLE_LABEL[sampleState(s)]} · due ${fmtDate(s.due_date)}</div></div>
               </a></li>`)}</ul>` : empty('tube', 'No samples in the lab right now.', html`<a class="btn btn-sm" href="#/submit">Submit samples</a>`)}
             </section>
             <section class="card">
@@ -561,7 +571,7 @@ async function samplesList(tab) {
           <td><a href="${`#/samples/${s.id}`}" style="color:inherit"><span class="mono" style="color:var(--accent-text)">${s.code}</span><div class="small muted" style="max-width:340px">${s.description}</div></a></td>
           <td data-label="Batch">${s.batch_no || '—'}</td>
           <td data-label="Ref.">${s.client_ref || '—'}</td>
-          <td>${samplePill(s.status)}</td>
+          <td>${samplePill(s)}</td>
           <td data-label="${s.status === 'Reported' ? 'Reported' : 'Due'}" class="nowrap">${fmtDate(s.status === 'Reported' ? s.reported_at : s.due_date)}</td>
           <td class="num">${s.status === 'Reported' ? html`<a class="btn btn-sm" href="${`#/coa/${s.id}`}">${ic('certificate', 15)} CoA</a>` : ''}</td></tr>`)}
       </tbody></table></div>` : empty('tube', tab === 'open' ? 'No samples in the lab right now.' : 'No samples to show.'));
@@ -577,7 +587,7 @@ async function samplesList(tab) {
 
 async function sampleDetail(id) {
   const [{ sample: s, tests, submission }, lk] = await Promise.all([api(`/samples/${id}`), lookups()]);
-  const stage = SAMPLE_STAGE[s.status] || 0;
+  const stage = SAMPLE_STAGE[sampleState(s)] || 0;
   const steps = [['Received', fmtDate(s.received_at)], ['Testing', ''], ['Review', ''], ['Reported', s.reported_at ? fmtDate(s.reported_at) : '']];
   return {
     title: s.code,
@@ -593,7 +603,8 @@ async function sampleDetail(id) {
       <div class="cols">
         <div class="stack">
           <section class="card card-pad">
-            <div class="row" style="justify-content:space-between;margin-bottom:18px"><h2>Progress</h2>${samplePill(s.status)}</div>
+            <div class="row" style="justify-content:space-between;margin-bottom:18px"><h2>Progress</h2>${samplePill(s)}</div>
+            ${SAMPLE_NOTE[sampleState(s)] ? html`<p class="small muted" data-intake-note style="margin-bottom:18px">${SAMPLE_NOTE[sampleState(s)]}${sampleState(s) === 'On hold' && submission ? html` <a href="${`#/submissions/${submission.id}`}">Open ${submission.code}</a>` : ''}</p>` : ''}
             <ol class="steps">${steps.map(([l, d], i) => html`<li class="${i + 1 <= stage ? 'done' : ''} ${i + 1 === stage ? 'current' : ''}"><div>${l}</div><div class="tiny faint">${d}</div></li>`)}</ol>
             ${s.status !== 'Reported' && s.due_date ? html`<p class="small muted" style="margin-top:18px">Expected completion <b style="color:var(--ink)">${fmtDate(s.due_date)}</b>${lk.priorityTones[s.priority] ? html` · ${s.priority} turnaround` : ''}</p>` : ''}
           </section>

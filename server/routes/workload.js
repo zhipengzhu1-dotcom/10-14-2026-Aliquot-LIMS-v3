@@ -3,7 +3,7 @@
 import { all, get, ph } from '../db.js';
 import { can } from '../auth.js';
 import { forbidden } from '../http.js';
-import { PROJECT_OPEN, rolesWith } from '../lookups.js';
+import { INTAKE_ACCEPTED, PROJECT_OPEN, rolesWith } from '../lookups.js';
 import { today, addDays } from '../util.js';
 import { TEST_EDITABLE, TEST_OPEN, TEST_RETURNED } from '../workflow.js';
 
@@ -45,7 +45,7 @@ export default function routes(r) {
     for (const { user_id, lead, ...project } of links) byId.get(user_id)?.projects.push({ ...project, lead: !!lead });
 
     return {
-      unassigned: get(`SELECT COUNT(*) AS n FROM tests WHERE analyst_id IS NULL AND status = 'Pending'`).n,
+      unassigned: get(`SELECT COUNT(*) AS n FROM tests t JOIN samples s ON s.id = t.sample_id WHERE t.analyst_id IS NULL AND t.status = 'Pending' AND s.intake = ?`, INTAKE_ACCEPTED).n,
       analysts: [...byId.values()],
     };
   });

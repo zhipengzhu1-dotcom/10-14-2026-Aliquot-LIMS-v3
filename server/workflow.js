@@ -10,7 +10,7 @@ import { all, get, run, ph, tx } from './db.js';
 import { update, mustGet } from './repo.js';
 import { bad, forbidden, guard } from './http.js';
 import { can, verifySignature, applySignature } from './auth.js';
-import { SAMPLE_OPEN, SIGNATURE_MEANINGS, priorityRank } from './lookups.js';
+import { SAMPLE_OPEN, SIGNATURE_MEANINGS, INTAKE_PENDING, INTAKE_HOLD, INTAKE_ACCEPTED, priorityRank } from './lookups.js';
 import { clean, nowIso, today, idList, round, sameValue, fixed, specText } from './util.js';
 import { openSampleInvestigation, openTestInvestigation, raiseInvestigation } from './investigations.js';
 
@@ -36,7 +36,7 @@ export const SAMPLE_SELECT = `
   LEFT JOIN users u ON u.id = s.received_by`;
 
 export const TEST_SELECT = `
-  SELECT t.*, s.code AS sample_code, s.description AS sample_description, s.batch_no, s.priority, s.client_id, s.project_id,
+  SELECT t.*, s.code AS sample_code, s.description AS sample_description, s.batch_no, s.priority, s.client_id, s.project_id, s.intake AS sample_intake,
     c.code AS client_code, c.name AS client_name,
     m.code AS method_code, m.version AS method_version, m.title AS method_title, m.technique,
     a.full_name AS analyst_name, a.initials AS analyst_initials,
@@ -105,13 +105,20 @@ function approvalRule(t, me) {
   if (t.reviewed_by === me.id) return forbidden('You reviewed this test — approval must come from a different person');
 }
 
+/** Refuses work on a Test whose Sample intake review has not accepted. */
+const intakeGate = (t) => (t.sample_intake === INTAKE_ACCEPTED ? undefined : bad(`${t.sample_code} has not been accepted at intake review yet — accept it before its tests are assigned or picked up`));
+
 export const TEST_RULES = {
   assign(t, me) {
     if (!can(me, 'tests.assign')) return forbidden();
+    const unaccepted = intakeGate(t);
+    if (unaccepted) return unaccepted;
     if (!TEST_EDITABLE.includes(t.status)) return bad(`${t.code} is ${t.status.toLowerCase()} and can't be reassigned`);
   },
   claim(t, me) {
     if (!can(me, 'tests.perform')) return forbidden();
+    const unaccepted = intakeGate(t);
+    if (unaccepted) return unaccepted;
     if (t.analyst_id) return bad(`${t.code} is already assigned to ${t.analyst_name}`);
     if (t.status !== 'Pending') return bad('Only pending tests can be picked up');
     if (!isQualified(me.id, t.method_code)) return forbidden(`You are not qualified on ${t.method_code}`);
@@ -173,6 +180,7 @@ export const unassignedTests = (sampleId, me) => sampleTests(sampleId).filter((t
 export const SAMPLE_RULES = {
   assign(s, me) {
     if (!can(me, 'tests.assign')) return forbidden();
+    if (s.intake !== INTAKE_ACCEPTED) return bad('This sample has not been accepted at intake review yet — accept it before its tests are assigned');
     if (!unassignedTests(s.id, me).length) return bad('Every test on this sample is already assigned');
   },
   issue(s, me) {
@@ -219,11 +227,47 @@ export const SAMPLE_RULES = {
     if (!can(me, 'samples.edit')) return forbidden();
     if (!SAMPLE_OPEN.includes(s.status)) return bad(`The sample is ${s.status.toLowerCase()} — attachments are locked`);
   },
+
+  accept(s, me) {
+    if (!can(me, 'samples.review')) return forbidden();
+    if (s.intake === INTAKE_ACCEPTED) return bad('This sample is already accepted');
+    if (!SAMPLE_OPEN.includes(s.status)) return bad(`Sample is ${s.status.toLowerCase()} and can't be accepted`);
+  },
+
+  hold(s, me) {
+    if (!can(me, 'samples.review')) return forbidden();
+    if (s.intake === INTAKE_HOLD) return bad('This sample is already on hold');
+    if (s.intake !== INTAKE_PENDING) return bad('Only a sample waiting for intake review can be put on hold');
+    if (!SAMPLE_OPEN.includes(s.status)) return bad(`Sample is ${s.status.toLowerCase()} and can't be put on hold`);
+  },
+  release(s, me) {
+    if (!can(me, 'samples.review')) return forbidden();
+    if (s.intake !== INTAKE_HOLD) return bad('This sample is not on hold');
+  },
+
+  // Stricter than `cancel`, never a way around it: it needs `samples.review` rather than `tests.cancel`, but only
+  // before any work has begun and while no Investigation is open.
+  reject(s, me) {
+    if (!can(me, 'samples.review')) return forbidden();
+    if (!SAMPLE_OPEN.includes(s.status)) return bad(`Sample is ${s.status.toLowerCase()} and can't be rejected`);
+    if (sampleTests(s.id).some((t) => !['Pending', 'Cancelled'].includes(t.status))) return bad('Testing has started on this sample — it can no longer be rejected');
+    if (s.intake === INTAKE_ACCEPTED) return bad('This sample has been accepted — it can no longer be rejected');
+    const inv = openSampleInvestigation(s.id) ?? openTests(s.id).map((t) => openTestInvestigation(t.id)).find(Boolean);
+    if (inv) return bad(`${inv.code} is open for this sample — close it before the sample can be rejected`);
+  },
 };
 
 export const SAMPLE_QUEUES = {
   certificate: { rule: 'issue', stage: () => all(`${SAMPLE_SELECT} WHERE s.status = 'Approved' ORDER BY s.due_date, s.id`) },
+
+  // Intake review. `intake`: Receiving & Review's Pending review and On hold tabs, the Samples waiting for a decision.
+  // `ready`: its Ready to assign tab, accepted Samples that may still have Tests to assign.
+  intake: { rule: 'accept', stage: () => intakeStage([INTAKE_PENDING, INTAKE_HOLD]) },
+  ready: { rule: 'assign', stage: () => intakeStage([INTAKE_ACCEPTED]) },
 };
+
+/** The open Samples at intake state `states`, the most urgent first: due date, then priority. */
+const intakeStage = (states) => all(`${SAMPLE_SELECT} WHERE s.intake IN (${ph(states)}) AND s.status IN (${ph(SAMPLE_OPEN)}) ORDER BY s.due_date, ${priorityRank('s.priority')}, s.id`, ...states, ...SAMPLE_OPEN);
 
 /** The one way a Test's status changes: audited as a status change, with its Sample's status re-derived in the same transaction. */
 function changeStatus(ctx, t, patch, meta) {
@@ -251,19 +295,37 @@ export function issueReport(ctx, sampleId, body) {
 export function cancelSample(ctx, sampleId, body) {
   const s = mustGet('SELECT * FROM samples WHERE id = ?', sampleId, 'Sample');
   guard(SAMPLE_RULES.cancel(s, ctx.user));
-  const reason = String(body.reason || '').trim();
+  cancelSampleAndTests(ctx, s, body.reason);
+  return { ok: true };
+}
+
+/**
+ * The cancellation itself, once the caller's own rule has allowed it: the Sample and every open Test, with `reason`,
+ * in one transaction. Rejecting at intake review reuses it under its own rule.
+ */
+export function cancelSampleAndTests(ctx, s, reason) {
+  reason = String(reason || '').trim();
   if (!reason) throw bad('A reason is required', 'REASON_REQUIRED');
   // The Sample is cancelled first so that cancelling its Tests doesn't re-derive its status on the way.
   tx(() => {
     update(ctx, 'samples', s.id, { status: 'Cancelled' }, { action: 'STATUS', summary: 'Sample cancelled', reason });
     for (const t of openTests(s.id)) changeStatus(ctx, t, { status: 'Cancelled' }, { summary: 'Test cancelled with sample', reason });
   });
-  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------------------------
 // Test services
 // ---------------------------------------------------------------------------------------------
+
+/** Why Test `t` cannot go to `analyst` (null to unassign) beyond the assign rule: results already entered, or no current qualification. */
+export function assignBlocker(t, analyst) {
+  if (t.analyst_id && t.analyst_id !== analyst?.id && get('SELECT 1 FROM results WHERE test_id = ? AND entered_at IS NOT NULL', t.id)) {
+    return bad(`${t.code} already has results entered by ${t.analyst_name} — it can't be ${analyst ? 'reassigned' : 'unassigned'}`);
+  }
+  if (analyst && !isQualified(analyst.id, t.method_code)) {
+    return bad(`${analyst.full_name} is not qualified on ${t.method_code}. Record their training under Team → Training first.`);
+  }
+}
 
 export function assignTests(ctx, body) {
   const ids = idList(body.test_ids);
@@ -275,12 +337,8 @@ export function assignTests(ctx, body) {
   const due = body.due_date ? clean(body, { due_date: { type: 'date' } }).due_date : undefined;
   tx(() => {
     for (const t of tests) {
-      if (t.analyst_id && t.analyst_id !== analyst?.id && get('SELECT 1 FROM results WHERE test_id = ? AND entered_at IS NOT NULL', t.id)) {
-        throw bad(`${t.code} already has results entered by ${t.analyst_name} — it can't be ${analyst ? 'reassigned' : 'unassigned'}`);
-      }
-      if (analyst && !isQualified(analyst.id, t.method_code)) {
-        throw bad(`${analyst.full_name} is not qualified on ${t.method_code}. Record their training under Team → Training first.`);
-      }
+      const blocked = assignBlocker(t, analyst);
+      if (blocked) throw blocked;
       update(ctx, 'tests', t.id, { analyst_id: analyst?.id ?? null, due_date: due }, {
         summary: analyst ? `Assigned to ${analyst.full_name}` : 'Unassigned',
       });

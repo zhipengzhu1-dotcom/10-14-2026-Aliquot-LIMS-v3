@@ -9,6 +9,7 @@ import {
   localDateTimeValue, todayIso, isoDate, person, badge, debounce,
 } from '../core/ui.js';
 import { stepper, signatureList, recordFooter, wireRecordFooter } from '../core/components.js';
+import { intakeBadge } from './intake-values.js';
 import { LAB_FIELDS, gridFromText, guessMapping, readSheet, withHeader } from '/portal/sheet.js';
 
 const SAMPLE_STEPS = ['Received', 'In Testing', 'In Review', 'Approved', 'Reported'];
@@ -434,6 +435,12 @@ export async function detail(ctx) {
           ['Storage', s.storage], ['Location', s.location], ['Condition', s.condition && s.condition !== 'Acceptable' ? badge(s.condition, 'amber') : s.condition],
           ['Received by', s.received_by_name], ['Due', fmtDate(s.due_date)], s.reported_at && ['CoA issued', fmtDateTime(s.reported_at)], s.notes && ['Notes', s.notes],
         ]) })}
+        ${card({
+          title: 'Intake review',
+          sub: d.intake.decisions.length ? null : 'No decision has been taken on this sample yet.',
+          actions: intakeBadge(d.intake.state),
+          body: d.intake.decisions.length ? html`<ol class="timeline" data-intake-history>${d.intake.decisions.map((x) => html`<li><span class="tl-dot"></span><div class="tl-body"><div><strong>${x.decision}</strong></div><div class="muted small">${x.decided_by_name} · ${fmtDateTime(x.decided_at)}</div>${x.reason ? html`<div class="small">${x.reason}</div>` : ''}</div></li>`)}</ol>` : '',
+        })}
         ${card({
           title: 'Chain of custody',
           actions: d.can.custody ? html`<button class="btn sm" data-act="custody">${icon('pin', { size: 13 })}Move</button>` : '',

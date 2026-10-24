@@ -12,6 +12,8 @@ import { PORT, HOST, PUBLIC_DIR, DATA_DIR, BACKUP_KEEP } from './server/config.j
 import { localDate, nowIso } from './server/util.js';
 import coreRoutes from './server/routes/core.js';
 import labRoutes from './server/routes/lab.js';
+import intakeRoutes from './server/routes/intake.js';
+import intakeAssignRoutes from './server/routes/intake-assign.js';
 import resourceRoutes from './server/routes/resources.js';
 import businessRoutes from './server/routes/business.js';
 import qualityRoutes from './server/routes/quality.js';
@@ -30,7 +32,7 @@ if (major < 22 || (major === 22 && minor < 13)) {
 openDb();
 
 const router = new Router();
-for (const register of [coreRoutes, labRoutes, resourceRoutes, businessRoutes, qualityRoutes, attachmentRoutes, dashboardRoutes, workloadRoutes, documentRoutes, portalRoutes]) register(router);
+for (const register of [coreRoutes, labRoutes, intakeRoutes, intakeAssignRoutes, resourceRoutes, businessRoutes, qualityRoutes, attachmentRoutes, dashboardRoutes, workloadRoutes, documentRoutes, portalRoutes]) register(router);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',

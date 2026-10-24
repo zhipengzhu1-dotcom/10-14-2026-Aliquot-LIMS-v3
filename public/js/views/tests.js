@@ -9,6 +9,7 @@ import {
   emptyState, field, openForm, esign, toast, showError, busy, promptReason, specText, resultText, outcomeBadge, person, badge, debounce, todayIso,
 } from '../core/ui.js';
 import { stepper, signatureList, recordFooter, wireRecordFooter } from '../core/components.js';
+import { acceptedWithChangesNotice } from './intake-changes.js';
 
 const TEST_STEPS = ['Pending', 'In Progress', 'Submitted', 'Reviewed', 'Approved'];
 
@@ -192,6 +193,7 @@ export async function detail(ctx) {
 
     <div class="card stepper-card">${stepper(TEST_STEPS, t.status === 'Cancelled' ? null : t.status, { stopped: t.status === 'Cancelled' })}</div>
 
+    ${acceptedWithChangesNotice(d.intake_changes, t.sample_code)}
     ${returned ? html`<div class="notice warn mb">${icon('undo', { size: 16 })}<span><strong>Returned by ${returned.full_name}:</strong> “${returned.comment}” — correct and resubmit.</span></div>` : ''}
     ${d.can.return && !d.can.accept ? html`<div class="notice bad mb">${icon('alert', { size: 16 })}<span>Investigation ${openInv.map((v) => html`<a href="/investigations/${v.id}"><strong>${v.code}</strong></a> `)}is open — this result cannot be approved until it is closed.</span></div>` : ''}
     ${t.analyst_id === state.me.id && !d.qualifiedMe && !['Approved', 'Cancelled'].includes(t.status) ? html`<div class="notice warn mb">${icon('training', { size: 16 })}<span>Your training on ${t.method_code} is not current. Ask your manager to update the training record before you record results.</span></div>` : ''}

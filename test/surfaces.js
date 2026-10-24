@@ -6,6 +6,10 @@ const listed = async (c, url, id) => (await c.ok('GET', url)).some((x) => x.id =
 const onReviews = async (c, list, id) => (await c.ok('GET', '/api/reviews'))[list].some((x) => x.id === id);
 export const inMyDrafts = async (c, e) => (await c.ok('GET', '/api/dashboard')).myDrafts.some((n) => n.id === e.id);
 export const inNotebookDrafts = (c, e) => listed(c, '/api/notebook?work=drafts', e.id);
+const onIntake = async (c, tabs, id) => {
+  for (const tab of tabs) if ((await c.ok('GET', `/api/intake?tab=${tab}`)).groups.some((g) => g.samples.some((x) => x.id === id))) return true;
+  return false;
+};
 const workFilters = (work) => ({
   'Samples work filter': (c, t) => listed(c, `/api/samples?limit=2000&work=${work}`, t.sampleId),
   'Tests work filter': (c, t) => listed(c, `/api/tests?limit=3000&work=${work}`, t.testId),
@@ -20,6 +24,9 @@ export const SURFACES = {
   },
   SAMPLE_QUEUES: {
     certificate: { 'Reviews page certificate list': (c, s) => onReviews(c, 'toIssue', s) },
+    // The Pending review and On hold tabs of Receiving & Review both read the intake Queue.
+    intake: { 'Receiving & Review Pending review and On hold tabs': (c, s) => onIntake(c, ['pending', 'hold'], s) },
+    ready: { 'Receiving & Review Ready to assign tab': (c, s) => onIntake(c, ['ready'], s) },
   },
   ENTRY_QUEUES: {
     witness: { 'Reviews page witness list': (c, e) => onReviews(c, 'toWitness', e.id) },
@@ -31,5 +38,6 @@ export const SURFACES = {
 // The Queues each sidebar badge counts, as [Queue table, Queue].
 export const BADGES = {
   myTests: [['TEST_QUEUES', 'assigned']],
+  intake: [['SAMPLE_QUEUES', 'intake']],
   reviews: [['TEST_QUEUES', 'review'], ['TEST_QUEUES', 'approval'], ['SAMPLE_QUEUES', 'certificate'], ['ENTRY_QUEUES', 'witness']],
 };

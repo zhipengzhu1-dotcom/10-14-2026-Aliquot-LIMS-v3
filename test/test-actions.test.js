@@ -62,6 +62,7 @@ async function kfTests(analystUsername) {
   const clients = await priya.ok('GET', '/api/clients');
   const kf = (await priya.ok('GET', '/api/methods?usable=1')).find((m) => m.code === 'ATM-0002' && m.status === 'Effective');
   const res = await priya.ok('POST', '/api/samples/receive', { client_id: clients[0].id, samples: [{ description: 'Test actions' }], method_ids: [kf.id] });
+  await priya.ok('POST', `/api/samples/${res.samples[0].id}/accept`);
   const sample = await priya.ok('GET', `/api/samples/${res.samples[0].id}`);
   const users = await priya.ok('GET', '/api/users');
   const testIds = sample.tests.map((t) => t.id);

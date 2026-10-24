@@ -106,6 +106,7 @@ export default function routes(r) {
     const witness = queued(ENTRY_RULES, ENTRY_QUEUES.witness, ctx.user).length;
     return {
       myTests: tests('assigned'),
+      intake: queued(SAMPLE_RULES, SAMPLE_QUEUES.intake, ctx.user).length,
       reviews: tests('review') + tests('approval') + witness + certificates,
       investigations: get(`SELECT COUNT(*) n FROM investigations v WHERE ${INVESTIGATION_OPEN}`).n,
       portal: portalBadge(ctx.user), // unread client messages + new submissions/requests
