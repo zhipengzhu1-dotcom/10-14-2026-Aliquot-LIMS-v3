@@ -155,7 +155,9 @@ test('a person without samples.review sees an empty Queue and an empty badge', a
       const q = await queue(who, `?tab=${tab}`);
       assert.deepEqual([username, tab, q.groups], [username, tab, []]);
     }
-    assert.deepEqual([username, (await queue(who)).counts], [username, { pending: 0, hold: 0, ready: 0 }]);
+    // Incoming counts Submissions, which anyone who may receive samples is offered; it is no Sample Queue.
+    const { incoming, ...samples } = (await queue(who)).counts;
+    assert.deepEqual([username, samples], [username, { pending: 0, hold: 0, ready: 0 }]);
     assert.equal(await badge(who), 0, `${username} badge`);
   }
 });

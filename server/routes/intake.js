@@ -10,7 +10,7 @@ import { INTAKE_PENDING, INTAKE_HOLD, INTAKE_ACCEPTED, DECISION_ACCEPTED, DECISI
 import { idList, nowIso, today } from '../util.js';
 import { SAMPLE_QUEUES, SAMPLE_RULES, SAMPLE_SELECT, cancelSampleAndTests } from '../workflow.js';
 import { reviewValues, submissionsOf } from '../intake-values.js';
-import { longDate, postMessage } from './portal.js';
+import { longDate, postMessage, SUBMISSION_QUEUES, SUBMISSION_RULES } from './portal.js';
 
 /**
  * Records who decided what on Sample `s`, when and why, in one transaction with moving it to intake state `intake`.
@@ -103,6 +103,7 @@ export function acceptSamples(ctx, ids) {
 
 // The rules whose refusal message the screen shows beside a disabled action.
 const SCREEN_ACTIONS = ['accept', 'hold', 'release', 'reject', 'assign'];
+const SUBMISSION_SCREEN_ACTIONS = ['acknowledge', 'decline', 'receive'];
 
 const TABS = {
   pending: { queue: SAMPLE_QUEUES.intake, intake: INTAKE_PENDING },
@@ -111,6 +112,13 @@ const TABS = {
 };
 
 const summary = ({ id, code, status, received_at }) => ({ id, code, status, received_at });
+
+// The Incoming tab lists Submissions, not Samples, so only the client filter and the search apply to it.
+function matchesSubmission(su, q) {
+  if (q.client_id && su.client_id !== +q.client_id) return false;
+  const term = String(q.q ?? '').trim().toLowerCase();
+  return !term || [su.code, su.client_name, su.submitted_by, su.courier, su.tracking_no].some((v) => String(v ?? '').toLowerCase().includes(term));
+}
 
 function matches(s, q) {
   if (q.client_id && s.client_id !== +q.client_id) return false;
@@ -122,21 +130,29 @@ function matches(s, q) {
 }
 
 export default function routes(r) {
-  // The tab counts follow the filters. A person without `samples.review` is offered nothing, so gets no groups.
+  // The tab counts follow the filters. A person without `samples.review` is offered no Samples, so gets no groups.
+  // `incoming` is the one tab of Submissions, read through their own Queue: `submissions` carries them, `groups` is empty.
   r.get('/api/intake', (ctx) => {
     const tab = ctx.query.tab || 'pending';
-    if (!Object.hasOwn(TABS, tab)) throw bad(`Tab must be one of: ${Object.keys(TABS).join(', ')}`);
+    if (tab !== 'incoming' && !Object.hasOwn(TABS, tab)) throw bad(`Tab must be one of: incoming, ${Object.keys(TABS).join(', ')}`);
     const rows = {};
     for (const [name, t] of Object.entries(TABS)) rows[name] = queued(SAMPLE_RULES, t.queue, ctx.user).filter((s) => s.intake === t.intake && matches(s, ctx.query));
-    const submissions = submissionsOf(rows[tab].map((s) => s.id));
+    const incoming = queued(SUBMISSION_RULES, SUBMISSION_QUEUES.incoming, ctx.user).filter((su) => matchesSubmission(su, ctx.query));
+    const shown = rows[tab] ?? [];
+    const submissions = submissionsOf(shown.map((s) => s.id));
     const groups = new Map();
-    for (const s of rows[tab]) {
+    for (const s of shown) {
       const submission = submissions.get(s.id) ? summary(submissions.get(s.id)) : null;
       const key = submission ? `s${submission.id}` : 'direct';
       if (!groups.has(key)) groups.set(key, { submission, samples: [] });
       groups.get(key).samples.push({ ...s, can: flags(SAMPLE_RULES, s, ctx.user), locks: locks(SAMPLE_RULES, s, ctx.user, ...SCREEN_ACTIONS) });
     }
-    return { tab, counts: Object.fromEntries(Object.keys(TABS).map((name) => [name, rows[name].length])), groups: [...groups.values()] };
+    return {
+      tab,
+      counts: { incoming: incoming.length, ...Object.fromEntries(Object.keys(TABS).map((name) => [name, rows[name].length])) },
+      groups: [...groups.values()],
+      submissions: tab === 'incoming' ? incoming.map((su) => ({ ...su, can: flags(SUBMISSION_RULES, su, ctx.user), locks: locks(SUBMISSION_RULES, su, ctx.user, ...SUBMISSION_SCREEN_ACTIONS) })) : [],
+    };
   });
 
   // One key per section of the review pane, each computed in its own module.

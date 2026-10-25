@@ -149,6 +149,16 @@ export const SUBMISSION_RULES = {
   },
 };
 
+const SUBMISSION_LIST = `SELECT su.id, su.code, su.status, su.priority, su.sample_type, su.courier, su.tracking_no, su.ship_date, su.created_at, su.updated_at,
+    json_array_length(su.samples) AS sample_count, json_array_length(su.method_ids) AS method_count,
+    c.id AS client_id, c.name AS client_name, c.code AS client_code, pu.full_name AS submitted_by
+  FROM portal_submissions su JOIN clients c ON c.id = su.client_id LEFT JOIN portal_users pu ON pu.id = su.portal_user_id`;
+
+// `incoming`: Receiving & Review's Incoming tab, the open Submissions whose parcel is still to be received, oldest first.
+export const SUBMISSION_QUEUES = {
+  incoming: { rule: 'receive', stage: () => all(`${SUBMISSION_LIST} WHERE su.status IN (${ph(SUBMISSION_OPEN)}) ORDER BY su.id`, ...SUBMISSION_OPEN) },
+};
+
 // The client's own actions take the signed-in portal user, never a staff user. Another client's submission is
 // refused as not found, so a contact cannot learn that it exists.
 export const CLIENT_SUBMISSION_RULES = {
@@ -647,11 +657,7 @@ export default function routes(r) {
     const params = [];
     if (status === 'open') { where.push(`su.status IN (${ph(SUBMISSION_OPEN)})`); params.push(...SUBMISSION_OPEN); }
     else if (status !== 'all') { where.push('su.status = ?'); params.push(status); }
-    return all(`SELECT su.id, su.code, su.status, su.priority, su.sample_type, su.courier, su.tracking_no, su.ship_date, su.created_at, su.updated_at,
-        json_array_length(su.samples) AS sample_count, json_array_length(su.method_ids) AS method_count,
-        c.id AS client_id, c.name AS client_name, c.code AS client_code, pu.full_name AS submitted_by
-      FROM portal_submissions su JOIN clients c ON c.id = su.client_id LEFT JOIN portal_users pu ON pu.id = su.portal_user_id
-      ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY su.id DESC LIMIT 500`, ...params);
+    return all(`${SUBMISSION_LIST} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY su.id DESC LIMIT 500`, ...params);
   }, staff);
 
   r.get('/api/portal-admin/submissions/:id', (ctx) => {

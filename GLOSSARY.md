@@ -41,7 +41,7 @@ The decision, taken per Sample between receipt and assignment, whether the lab w
 _Avoid_: Triage, login review, accessioning
 
 **Receiving & Review**:
-The Queue and screen in the Samples module where received Samples wait for their Intake review, grouped by the client Submission they came in, with tabs for Pending review, On hold and Ready to assign.
+The Queue and screen in the Samples module where received Samples wait for their Intake review, grouped by the client Submission they came in, with tabs for Incoming (client Submissions announced from the portal whose parcel is still to be received, where they are acknowledged, declined or received), Pending review, On hold and Ready to assign.
 _Avoid_: Intake queue, triage screen
 
 **Intake state**:
