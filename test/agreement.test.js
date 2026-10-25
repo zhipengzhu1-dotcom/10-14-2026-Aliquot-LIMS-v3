@@ -223,11 +223,8 @@ async function queueViews(c, records) {
   return views;
 }
 
-/**
- * Each surface in `views` agrees with its record's `can`, and each badge moved by the Queues entered. `flags` is keyed by
- * Queue table, one `can` or a list: a record whose surfaces are swept elsewhere still moves the badges.
- */
-function assertQueues(label, flags, views, before, after) {
+/** Each surface in `views` agrees with its record's `can`, for `flags` keyed by Queue table. */
+function assertSurfaces(label, flags, views) {
   for (const [table, byQueue] of Object.entries(views)) {
     const can = flags[table];
     for (const [name, queue] of Object.entries(QUEUES[table])) {
@@ -238,6 +235,14 @@ function assertQueues(label, flags, views, before, after) {
       }
     }
   }
+}
+
+/**
+ * Each surface in `views` agrees with its record's `can`, and each badge moved by the Queues entered. `flags` is keyed by
+ * Queue table, one `can` or a list: a record whose surfaces are swept elsewhere still moves the badges.
+ */
+function assertQueues(label, flags, views, before, after) {
+  assertSurfaces(label, flags, views);
   for (const [badge, queues] of Object.entries(BADGES)) {
     const entered = queues.reduce((n, [table, name]) => n + [flags[table] ?? []].flat().filter((can) => can[QUEUES[table][name].rule]).length, 0);
     assert.equal(after[badge] - before[badge], entered, `${label}: ${badge} badge vs the Queues it counts`);
@@ -1114,6 +1119,7 @@ for (const [state, steps] of Object.entries(SUBMISSION_STATES)) {
       const c = await as(username);
       const id = await prepare();
       const { can } = await c.ok('GET', `/api/portal-admin/submissions/${id}`);
+      assertSurfaces(`Submission ${state}, ${who}`, { SUBMISSION_QUEUES: can }, await queueViews(c, { SUBMISSION_QUEUES: id }));
       await sweepRecord({ label: `Submission ${state}, ${who}`, c, table: 'SUBMISSION_RULES', actions: SUBMISSION_ACTIONS, can, id, prepare });
     }
 

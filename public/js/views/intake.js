@@ -1,5 +1,5 @@
-// Receiving & Review: the Queue of received Samples waiting for an intake decision, grouped by Submission. The server
-// decides everything shown here: which Samples are listed, which actions each is offered (`can`) and why an action is
+// Receiving & Review: client Submissions on their way in (the Incoming tab), then the Queue of received Samples waiting
+// for an intake decision, grouped by Submission. The server decides everything shown here: which Samples are listed, which actions each is offered (`can`) and why an action is
 // refused (`locks`). This screen carries no status check of its own.
 import { html, raw } from '../core/html.js';
 import { api } from '../core/api.js';
@@ -13,8 +13,10 @@ import {
 import { assignAction } from './intake-assign.js';
 import { openReview } from './intake-review.js';
 import { showOutcomes } from './intake-outcomes.js';
+import { drawIncoming } from './intake-incoming.js';
 
 const tabs = () => [
+  { key: 'incoming', label: 'Incoming' },
   { key: 'pending', label: state.lookups.intakeStates.pending },
   { key: 'hold', label: state.lookups.intakeStates.hold },
   { key: 'ready', label: 'Ready to assign' },
@@ -87,7 +89,7 @@ export async function render(ctx) {
   let data;
 
   ctx.el.innerHTML = String(html`
-    ${pageHead({ title: 'Receiving & Review', sub: 'Samples received and waiting for a decision before their tests can be assigned.', back: { href: '/samples', label: 'Samples' } })}
+    ${pageHead({ title: 'Receiving & Review', sub: 'Client Submissions on their way in, and received samples waiting for a decision before their tests can be assigned.', back: { href: '/samples', label: 'Samples' } })}
     <div class="toolbar" data-toolbar></div>
     <div data-outcomes-host></div>
     <div data-list></div>`);
@@ -108,19 +110,19 @@ export async function render(ctx) {
       ${segmented(TABS.map((t) => ({ ...t, count: data.counts[t.key], href: setQuery({ tab: t.key === 'pending' ? null : t.key }) })), tab)}
       <select data-filter-client class="auto-w" aria-label="Client"><option value="">All clients</option>
         ${clients.map((c) => html`<option value="${c.id}" ${String(c.id) === ctx.query.client ? raw('selected') : ''}>${c.name}</option>`)}</select>
-      <select data-filter-project class="auto-w" aria-label="Project"><option value="">All projects</option>
+      ${tab === 'incoming' ? '' : html`<select data-filter-project class="auto-w" aria-label="Project"><option value="">All projects</option>
         ${projects.map((p) => html`<option value="${p.id}" ${String(p.id) === ctx.query.project ? raw('selected') : ''}>${p.code}</option>`)}</select>
       <select data-filter-priority class="auto-w" aria-label="Priority"><option value="">Any priority</option>
         ${state.lookups.priorities.map((p) => html`<option value="${p}" ${p === ctx.query.priority ? raw('selected') : ''}>${p}</option>`)}</select>
-      <label class="row" style="gap:6px"><input type="checkbox" data-filter-overdue ${ctx.query.overdue ? raw('checked') : ''}> Overdue</label>
+      <label class="row" style="gap:6px"><input type="checkbox" data-filter-overdue ${ctx.query.overdue ? raw('checked') : ''}> Overdue</label>`}
       ${hasFilter ? html`<a class="btn sm ghost" href="${setQuery({ client: null, project: null, priority: null, overdue: null })}">Clear filters</a>` : ''}
       <span class="spacer"></span>
-      ${searchBox('Search samples…', search)}`);
-    const pick = (sel, key) => bar.querySelector(sel).addEventListener('change', (e) => navigate(setQuery({ [key]: e.target.value })));
+      ${searchBox(tab === 'incoming' ? 'Search submissions…' : 'Search samples…', search)}`);
+    const pick = (sel, key) => bar.querySelector(sel)?.addEventListener('change', (e) => navigate(setQuery({ [key]: e.target.value })));
     pick('[data-filter-client]', 'client');
     pick('[data-filter-project]', 'project');
     pick('[data-filter-priority]', 'priority');
-    bar.querySelector('[data-filter-overdue]').addEventListener('change', (e) => navigate(setQuery({ overdue: e.target.checked ? 1 : null })));
+    bar.querySelector('[data-filter-overdue]')?.addEventListener('change', (e) => navigate(setQuery({ overdue: e.target.checked ? 1 : null })));
     const box = bar.querySelector('[data-filter]');
     box.addEventListener('input', debounce(() => {
       search = box.value;
@@ -132,6 +134,7 @@ export async function render(ctx) {
   function drawList() {
     const host = ctx.el.querySelector('[data-list]');
     const filtered = search || FILTERS.some((f) => ctx.query[f]);
+    if (tab === 'incoming') return drawIncoming(host, { submissions: data.submissions, filtered: search || ctx.query.client, after });
     if (!data.groups.length) {
       host.innerHTML = String(emptyState({
         icon: 'inbox',

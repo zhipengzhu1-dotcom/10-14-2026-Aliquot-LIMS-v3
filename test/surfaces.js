@@ -10,6 +10,7 @@ const onIntake = async (c, tabs, id) => {
   for (const tab of tabs) if ((await c.ok('GET', `/api/intake?tab=${tab}`)).groups.some((g) => g.samples.some((x) => x.id === id))) return true;
   return false;
 };
+const onIncoming = async (c, id) => (await c.ok('GET', '/api/intake?tab=incoming')).submissions.some((x) => x.id === id);
 const workFilters = (work) => ({
   'Samples work filter': (c, t) => listed(c, `/api/samples?limit=2000&work=${work}`, t.sampleId),
   'Tests work filter': (c, t) => listed(c, `/api/tests?limit=3000&work=${work}`, t.testId),
@@ -27,6 +28,9 @@ export const SURFACES = {
     // The Pending review and On hold tabs of Receiving & Review both read the intake Queue.
     intake: { 'Receiving & Review Pending review and On hold tabs': (c, s) => onIntake(c, ['pending', 'hold'], s) },
     ready: { 'Receiving & Review Ready to assign tab': (c, s) => onIntake(c, ['ready'], s) },
+  },
+  SUBMISSION_QUEUES: {
+    incoming: { 'Receiving & Review Incoming tab': (c, id) => onIncoming(c, id) },
   },
   ENTRY_QUEUES: {
     witness: { 'Reviews page witness list': (c, e) => onReviews(c, 'toWitness', e.id) },
