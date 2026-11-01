@@ -13,8 +13,9 @@ import { acceptSample } from './routes/intake.js';
 import { assignTests, startTest, saveResults, submitTest, reviewTest, approveTest, issueReport } from './workflow.js';
 import { createMethod, setMethodStatus, newMethodVersion, createInstrument, logInstrument, createInventory } from './routes/resources.js';
 import { createClient, createProject, setProjectStatus, createInvoice, setInvoiceStatus } from './routes/business.js';
-import { createPortalAccount, submitSamples, submitRequest, acknowledgeSubmission, receiveSubmission, respondToRequest } from './routes/portal.js';
+import { createPortalAccount, submitRequest, respondToRequest } from './routes/portal.js';
 import { createThread, postMessage } from './portal-threads.js';
+import { submitSamples, moveSubmission } from './submissions.js';
 import { createDocument, addVersion } from './routes/documents.js';
 import { makeXlsx, makeDocx } from './ooxml.js';
 import {
@@ -924,9 +925,11 @@ export function seedDemo() {
       method_ids: [M['ATM-0001'].id, M['ATM-0004'].id, M['ATM-0002'].id],
     });
     setClock(new Date(work(dayAt(146, 11, 30))));
-    acknowledgeSubmission(as('priya.raman'), sub.id, 'Thanks Laura — slot booked for receipt tomorrow morning.');
+    const priya = as('priya.raman');
+    moveSubmission(priya, priya.user, sub.id, 'acknowledge', { note: 'Thanks Laura — slot booked for receipt tomorrow morning.' });
     setClock(new Date(work(dayAt(147, 9, 10))));
-    receiveSubmission(as('nadia.rossi'), sub.id, { condition: 'Acceptable', location: 'Sample store A · Shelf 2', received_at: new Date(work(dayAt(147, 9, 10))).toISOString() });
+    const nadia = as('nadia.rossi');
+    moveSubmission(nadia, nadia.user, sub.id, 'receive', { condition: 'Acceptable', location: 'Sample store A · Shelf 2', received_at: new Date(work(dayAt(147, 9, 10))).toISOString() });
   });
   // Shipment announced and acknowledged, still in transit.
   on(dayAt(148, 15, 30), () => {
@@ -937,7 +940,8 @@ export function seedDemo() {
       method_ids: [M['ATM-0001'].id, M['ATM-0004'].id],
     });
     setClock(new Date(work(dayAt(149, 9, 20))));
-    acknowledgeSubmission(as('priya.raman'), sub.id, 'Next-day turnaround confirmed. We will start testing on receipt.');
+    const priya = as('priya.raman');
+    moveSubmission(priya, priya.user, sub.id, 'acknowledge', { note: 'Next-day turnaround confirmed. We will start testing on receipt.' });
   });
   // New this morning — waiting for the lab.
   on(NOW - 3 * HOUR, () => {

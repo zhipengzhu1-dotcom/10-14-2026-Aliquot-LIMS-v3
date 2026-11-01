@@ -11,7 +11,7 @@ import { idList, longDate, nowIso, today } from '../util.js';
 import { SAMPLE_QUEUES, SAMPLE_RULES, SAMPLE_SELECT, cancelSampleAndTests } from '../workflow.js';
 import { reviewValues, submissionsOf } from '../intake-values.js';
 import { postMessage } from '../portal-threads.js';
-import { SUBMISSION_QUEUES, SUBMISSION_RULES } from './portal.js';
+import { SUBMISSION_QUEUES, SUBMISSION_RULES } from '../submissions.js';
 
 /**
  * Records who decided what on Sample `s`, when and why, in one transaction with moving it to intake state `intake`.
