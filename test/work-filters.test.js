@@ -65,19 +65,22 @@ async function setupLab() {
   const clients = await priya.ok('GET', '/api/clients');
   lab.acme = clients.find((c) => c.code === 'ACME');
   lab.other = clients.find((c) => c.code !== 'ACME');
-  lab.hplc = (await priya.ok('GET', '/api/methods?usable=1')).find((m) => m.code === 'ATM-0001' && m.status === 'Effective');
+  const methods = await priya.ok('GET', '/api/methods?usable=1');
+  lab.hplc = methods.find((m) => m.code === 'ATM-0001' && m.status === 'Effective');
+  // Tom is not qualified on ATM-0003.
+  lab.unqualified = methods.find((m) => m.code === 'ATM-0003' && m.status === 'Effective');
   lab.users = Object.fromEntries((await priya.ok('GET', '/api/users')).map((u) => [u.username, u]));
   lab.ready = true;
   return lab;
 }
 
-async function receive(client = lab.acme) {
+async function receive(client = lab.acme, { method = lab.hplc, accept = true } = {}) {
   const priya = await as('priya.raman');
   const { samples } = await priya.ok('POST', '/api/samples/receive', {
     client_id: client.id, sample_type: 'Drug Product', storage: 'Ambient (15–25 °C)', priority: 'One week',
-    samples: [{ description: 'Work filter sample' }], method_ids: [lab.hplc.id],
+    samples: [{ description: 'Work filter sample' }], method_ids: [method.id],
   });
-  await priya.ok('POST', `/api/samples/${samples[0].id}/accept`);
+  if (accept) await priya.ok('POST', `/api/samples/${samples[0].id}/accept`);
   const detail = await priya.ok('GET', `/api/samples/${samples[0].id}`);
   return { id: samples[0].id, testId: detail.tests[0].id };
 }
@@ -103,6 +106,18 @@ async function review(s, username) {
 }
 
 const ids = async (c, query) => new Set((await c.ok('GET', `/api/samples?limit=2000&${query}`)).map((s) => s.id));
+const testIds = async (c, query) => new Set((await c.ok('GET', `/api/tests?limit=3000&${query}`)).map((t) => t.id));
+
+/** A Test the analyst started and that was then unassigned before any result was entered: In Progress, with no analyst. */
+async function startedThenUnassigned() {
+  const s = await receive();
+  await assign(s, 'tom.fletcher');
+  await (await as('tom.fletcher')).ok('POST', `/api/tests/${s.testId}/start`);
+  await (await as('priya.raman')).ok('POST', '/api/tests/assign', { test_ids: [s.testId], analyst_id: null });
+  const { test: t } = await (await as('priya.raman')).ok('GET', `/api/tests/${s.testId}`);
+  assert.deepEqual([t.status, t.analyst_id], ['In Progress', null]);
+  return s;
+}
 
 test('analyst "assigned" lists samples with their unfinished Tests only', async () => {
   await setupLab();
@@ -177,6 +192,74 @@ test('QA "approval" lists Reviewed Tests they neither performed nor reviewed', a
   const priya = await as('priya.raman');
   assert.ok(!(await ids(priya, 'work=approval')).has(performedByPriya.id), 'Test I performed');
   assert.ok((await ids(daniel, 'work=approval')).has(performedByPriya.id), 'performed by someone else');
+});
+
+test('manager "assignable" lists the Tests they may assign or reassign, and unassigned=1 limits it to those nobody holds', async () => {
+  await setupLab();
+  const pending = await receive();
+  const started = await startedThenUnassigned();
+  const taken = await receive();
+  await assign(taken, 'tom.fletcher');
+  const priya = await as('priya.raman');
+
+  const assignable = await testIds(priya, 'work=assignable');
+  assert.ok(assignable.has(taken.testId), 'a Test assigned to someone can be reassigned');
+  const unassigned = await testIds(priya, 'work=assignable&unassigned=1');
+  assert.ok(unassigned.has(pending.testId), 'Pending Test with no analyst');
+  assert.ok(unassigned.has(started.testId), 'In Progress Test with no analyst');
+  assert.ok(!unassigned.has(taken.testId), 'Test assigned to someone');
+});
+
+test('analyst "claimable" lists only the Pending Tests with no analyst they are qualified to pick up', async () => {
+  await setupLab();
+  const qualified = await receive();
+  const unqualified = await receive(lab.acme, { method: lab.unqualified });
+  const started = await startedThenUnassigned();
+  const notAccepted = await receive(lab.acme, { accept: false });
+
+  const claimable = await testIds(await as('tom.fletcher'), 'work=claimable');
+  assert.ok(claimable.has(qualified.testId), 'Pending, on a Method Tom is qualified on');
+  assert.ok(!claimable.has(unqualified.testId), 'on a Method Tom is not qualified on');
+  assert.ok(!claimable.has(started.testId), 'In Progress: only Pending Tests can be picked up');
+  assert.ok(!claimable.has(notAccepted.testId), 'on a Sample intake review has not accepted');
+});
+
+test('oversight (lab=1) shows the administrator a Queue\'s stage unfiltered, and only the administrator', async () => {
+  await setupLab();
+  const accepted = await receive();
+  const notAccepted = await receive(lab.acme, { accept: false });
+  const admin = await as('admin');
+
+  assert.deepEqual(await testIds(admin, 'work=assignable'), new Set(), 'the administrator assigns nothing, so their own Queue is empty');
+  const stage = await testIds(admin, 'work=assignable&unassigned=1&lab=1');
+  assert.ok(stage.has(accepted.testId));
+  assert.ok(stage.has(notAccepted.testId), 'the stage is nobody\'s work, so the rule does not filter it');
+  assert.equal((await (await as('priya.raman')).get('/api/tests?work=assignable&lab=1')).status, 403, 'oversight needs work.oversee');
+});
+
+test('the Dashboard and Workload count the unassigned Tests each person sees on their Worklist', async () => {
+  await setupLab();
+  await receive();
+  await startedThenUnassigned();
+  await receive(lab.acme, { accept: false });
+  const count = async (c, query) => (await c.ok('GET', `/api/tests?limit=3000&${query}`)).length;
+
+  // Who sees which: whoever assigns, the Queue they assign from; else an analyst, the one they pick up from; else oversight.
+  const expected = {
+    'priya.raman': { queue: 'assignable', query: 'work=assignable&unassigned=1' },
+    'tom.fletcher': { queue: 'claimable', query: 'work=claimable' },
+    admin: { queue: 'stage', query: 'work=assignable&unassigned=1&lab=1' },
+  };
+  for (const [username, { queue, query }] of Object.entries(expected)) {
+    const c = await as(username);
+    const n = await count(c, query);
+    assert.ok(n > 0, `${username} has unassigned Tests to see`);
+    assert.deepEqual((await c.ok('GET', '/api/dashboard')).kpis.unassigned, { queue, n }, `${username}: Dashboard`);
+  }
+  const counts = await Promise.all(['priya.raman', 'tom.fletcher', 'admin'].map(async (u) => count(await as(u), expected[u].query)));
+  assert.equal(new Set(counts).size, 3, 'the three views differ, so a swapped Queue would show');
+  assert.equal((await (await as('admin')).ok('GET', '/api/workload')).unassigned, counts[2], 'Workload, for oversight');
+  assert.deepEqual((await (await as('daniel.okafor')).ok('GET', '/api/dashboard')).kpis.unassigned, { queue: null, n: 0 }, 'QA neither assigns nor picks up');
 });
 
 test('a work filter asked for without its permission returns 200 and an empty list', async () => {
