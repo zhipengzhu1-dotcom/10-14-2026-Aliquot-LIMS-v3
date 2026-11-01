@@ -10,3 +10,4 @@ What a reviewer holds a change to. Implementers read the pointers in `CLAUDE.md`
 - **Escape by default in the browser.** Build markup with the `html` tagged template from `public/js/core/html.js`; never concatenate user data into HTML.
 - **One route module per area, one view module per screen.** Put new code next to the code it belongs with, not in a new shared helper, unless two areas genuinely need it.
 - **Test through HTTP.** New behaviour gets an assertion in `test/*.test.js` against the running server, including the case that must be refused.
+- **Every visible behaviour change traces to a Decision.** A change a person would notice (what a count or list holds, an action shown or hidden, a label, an API's answer or refusal) is named in the Decisions of the change's issue, as in #59. A change the issue does not name is a question for the issue's owner, raised before merge, not a call the implementer makes.
