@@ -101,57 +101,103 @@ export function acceptSamples(ctx, ids) {
 
 // Receiving & Review
 
-// The rules whose refusal message the screen shows beside a disabled action.
-const SCREEN_ACTIONS = ['accept', 'hold', 'release', 'reject', 'assign'];
-const SUBMISSION_SCREEN_ACTIONS = ['acknowledge', 'decline', 'receive'];
-
-const TABS = {
-  pending: { queue: SAMPLE_QUEUES.intake, intake: INTAKE_PENDING },
-  hold: { queue: SAMPLE_QUEUES.intake, intake: INTAKE_HOLD },
-  ready: { queue: SAMPLE_QUEUES.ready, intake: INTAKE_ACCEPTED },
+// How each kind of record a tab lists is acted on and searched, and the key of the answer that carries it: Samples are
+// grouped by the Submission they came in, Submissions are listed as they are.
+const KINDS = {
+  sample: { rules: SAMPLE_RULES, key: 'groups', terms: (s) => [s.code, s.description, s.batch_no, s.client_ref, s.client_name], present: (rows) => bySubmission(rows) },
+  submission: { rules: SUBMISSION_RULES, key: 'submissions', terms: (su) => [su.code, su.client_name, su.submitted_by, su.courier, su.tracking_no], present: (rows) => rows },
 };
+
+// The filters a tab may apply, by the name its row lists them under. `param` is the query parameter that carries the value.
+const FILTERS = {
+  client: { param: 'client_id', test: (r, v) => r.client_id === +v },
+  project: { param: 'project_id', test: (r, v) => r.project_id === +v },
+  priority: { param: 'priority', test: (r, v) => r.priority === v },
+  overdue: { param: 'overdue', test: (r) => r.due_date < today() },
+};
+
+const SAMPLE_FILTERS = ['client', 'project', 'priority', 'overdue'];
+
+// One row per tab, the whole of its definition, sent with the data so the screen draws whichever tab it is given.
+// `queue` is read through its rule, then narrowed by `part` (Pending review and On hold split one Queue). `actions` are
+// the rules whose buttons each record shows, in order. `filters` and the search are the only ones the tab applies, so
+// the screen shows exactly those. `default` is the tab shown when none is asked for.
+const TABS = [
+  {
+    key: 'incoming', label: 'Incoming', kind: 'submission', queue: SUBMISSION_QUEUES.incoming,
+    actions: ['acknowledge', 'decline', 'receive'], filters: ['client'], search: 'Search submissions…',
+    empty: { icon: 'package', title: 'No submissions on their way', filtered: 'No submissions match', text: 'Clients announce shipments from the portal. Acknowledge them here, and receive them when the parcel arrives.' },
+  },
+  {
+    key: 'pending', label: INTAKE_PENDING, default: true, kind: 'sample', queue: SAMPLE_QUEUES.intake, part: (s) => s.intake === INTAKE_PENDING,
+    actions: ['accept', 'hold', 'reject'], filters: SAMPLE_FILTERS, search: 'Search samples…',
+    empty: { icon: 'inbox', title: 'Nothing waiting for review', filtered: 'No samples match', text: 'Newly received samples wait here for a manager or scientist to decide on them.' },
+  },
+  {
+    key: 'hold', label: INTAKE_HOLD, kind: 'sample', queue: SAMPLE_QUEUES.intake, part: (s) => s.intake === INTAKE_HOLD,
+    actions: ['accept', 'release', 'reject'], filters: SAMPLE_FILTERS, search: 'Search samples…',
+    empty: { icon: 'inbox', title: 'No samples on hold', filtered: 'No samples match', text: 'A sample put on hold waits here until the client has answered.' },
+  },
+  {
+    key: 'ready', label: 'Ready to assign', kind: 'sample', queue: SAMPLE_QUEUES.ready,
+    actions: ['assign'], filters: SAMPLE_FILTERS, search: 'Search samples…',
+    empty: { icon: 'inbox', title: 'Nothing ready to assign', filtered: 'No samples match', text: 'Accepted samples with tests still to assign wait here.' },
+  },
+];
 
 const summary = ({ id, code, status, received_at }) => ({ id, code, status, received_at });
 
-// The Incoming tab lists Submissions, not Samples, so only the client filter and the search apply to it.
-function matchesSubmission(su, q) {
-  if (q.client_id && su.client_id !== +q.client_id) return false;
-  const term = String(q.q ?? '').trim().toLowerCase();
-  return !term || [su.code, su.client_name, su.submitted_by, su.courier, su.tracking_no].some((v) => String(v ?? '').toLowerCase().includes(term));
+/** `samples` grouped by the Submission each came in, in their order; the ones received directly form one group. */
+function bySubmission(samples) {
+  const submissions = submissionsOf(samples.map((s) => s.id));
+  const groups = new Map();
+  for (const s of samples) {
+    const submission = submissions.get(s.id) ? summary(submissions.get(s.id)) : null;
+    const key = submission ? `s${submission.id}` : 'direct';
+    if (!groups.has(key)) groups.set(key, { submission, samples: [] });
+    groups.get(key).samples.push(s);
+  }
+  return [...groups.values()];
 }
 
-function matches(s, q) {
-  if (q.client_id && s.client_id !== +q.client_id) return false;
-  if (q.project_id && s.project_id !== +q.project_id) return false;
-  if (q.priority && s.priority !== q.priority) return false;
-  if (q.overdue && !(s.due_date < today())) return false;
-  const term = String(q.q ?? '').trim().toLowerCase();
-  return !term || [s.code, s.description, s.batch_no, s.client_ref, s.client_name].some((v) => String(v ?? '').toLowerCase().includes(term));
+/** Whether `record` passes the filters and search in `query` that `tab` applies; every other filter is ignored. */
+function matches(tab, record, query) {
+  if (tab.filters.some((name) => query[FILTERS[name].param] && !FILTERS[name].test(record, query[FILTERS[name].param]))) return false;
+  const term = String(query.q ?? '').trim().toLowerCase();
+  return !term || KINDS[tab.kind].terms(record).some((v) => String(v ?? '').toLowerCase().includes(term));
 }
+
+/**
+ * The `locks` of the actions `tab` shows on `record`: each one's refusal, null when allowed. An action refused because
+ * `person` lacks its permission is left out, so the screen hides it instead of showing it disabled on every row.
+ */
+function shownLocks(tab, record, person) {
+  const { rules } = KINDS[tab.kind];
+  return locks(rules, record, person, ...tab.actions.filter((name) => rules[name](record, person)?.code !== 'FORBIDDEN'));
+}
+
+const definition = ({ key, label, kind, actions, filters, search, empty, default: isDefault = false }) => ({ key, label, kind, actions, filters, search, empty, default: isDefault });
 
 export default function routes(r) {
-  // The tab counts follow the filters. A person without `samples.review` is offered no Samples, so gets no groups.
-  // `incoming` is the one tab of Submissions, read through their own Queue: `submissions` carries them, `groups` is empty.
+  // `tabs` defines every tab; only the one shown carries its records, each with `can` and the `locks` of the actions it
+  // shows. Each count follows that tab's own filters. A person offered nothing in a tab's Queue gets none of its records.
   r.get('/api/intake', (ctx) => {
-    const tab = ctx.query.tab || 'pending';
-    if (tab !== 'incoming' && !Object.hasOwn(TABS, tab)) throw bad(`Tab must be one of: incoming, ${Object.keys(TABS).join(', ')}`);
-    const rows = {};
-    for (const [name, t] of Object.entries(TABS)) rows[name] = queued(SAMPLE_RULES, t.queue, ctx.user).filter((s) => s.intake === t.intake && matches(s, ctx.query));
-    const incoming = queued(SUBMISSION_RULES, SUBMISSION_QUEUES.incoming, ctx.user).filter((su) => matchesSubmission(su, ctx.query));
-    const shown = rows[tab] ?? [];
-    const submissions = submissionsOf(shown.map((s) => s.id));
-    const groups = new Map();
-    for (const s of shown) {
-      const submission = submissions.get(s.id) ? summary(submissions.get(s.id)) : null;
-      const key = submission ? `s${submission.id}` : 'direct';
-      if (!groups.has(key)) groups.set(key, { submission, samples: [] });
-      groups.get(key).samples.push({ ...s, can: flags(SAMPLE_RULES, s, ctx.user), locks: locks(SAMPLE_RULES, s, ctx.user, ...SCREEN_ACTIONS) });
-    }
+    const tab = ctx.query.tab ? TABS.find((t) => t.key === ctx.query.tab) : TABS.find((t) => t.default);
+    if (!tab) throw bad(`Tab must be one of: ${TABS.map((t) => t.key).join(', ')}`);
+    const queues = new Map();
+    const listed = (t) => {
+      if (!queues.has(t.queue)) queues.set(t.queue, queued(KINDS[t.kind].rules, t.queue, ctx.user));
+      return queues.get(t.queue).filter((x) => (!t.part || t.part(x)) && matches(t, x, ctx.query));
+    };
+    const kind = KINDS[tab.kind];
+    const shown = listed(tab).map((x) => ({ ...x, can: flags(kind.rules, x, ctx.user), locks: shownLocks(tab, x, ctx.user) }));
     return {
-      tab,
-      counts: { incoming: incoming.length, ...Object.fromEntries(Object.keys(TABS).map((name) => [name, rows[name].length])) },
-      groups: [...groups.values()],
-      submissions: tab === 'incoming' ? incoming.map((su) => ({ ...su, can: flags(SUBMISSION_RULES, su, ctx.user), locks: locks(SUBMISSION_RULES, su, ctx.user, ...SUBMISSION_SCREEN_ACTIONS) })) : [],
+      tab: tab.key,
+      tabs: TABS.map(definition),
+      counts: Object.fromEntries(TABS.map((t) => [t.key, t === tab ? shown.length : listed(t).length])),
+      groups: [],
+      submissions: [],
+      [kind.key]: kind.present(shown),
     };
   });
 
