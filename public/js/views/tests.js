@@ -52,11 +52,16 @@ export async function assignDialog(testIds, tests) {
 export async function worklist(ctx) {
   ctx.title('Worklist');
   const canAssign = can('tests.assign');
+  // Tests nobody is assigned to: whoever assigns sees the ones they may assign, an analyst the ones they may pick up,
+  // and oversight every one (`lab`). The Queue sets the statuses, so the view drops `scope`.
+  const unassigned = canAssign ? { work: 'assignable', label: 'Unassigned' }
+    : can('tests.perform') ? { work: 'claimable', label: 'To pick up' }
+      : can('work.oversee') ? { work: 'assignable', lab: 1, label: 'Unassigned (all)' } : null;
   const defaultView = can('tests.perform') && !canAssign ? 'mine' : 'all';
-  const view = ctx.query.view || defaultView;
+  const view = ctx.query.view === 'unassigned' && !unassigned ? defaultView : ctx.query.view || defaultView;
   const params = { scope: 'open', method_id: ctx.query.method, analyst_id: ctx.query.analyst };
   if (view === 'mine') params.work = 'assigned';
-  if (view === 'unassigned') params.unassigned = 1;
+  if (view === 'unassigned') { delete params.scope; Object.assign(params, { work: unassigned.work, lab: unassigned.lab, unassigned: 1 }); }
   if (view === 'overdue') params.overdue = 1;
   if (view === 'review') params.scope = 'review';
   const [rows, methods] = await Promise.all([api.get('/api/tests', params), api.get('/api/methods')]);
@@ -71,7 +76,7 @@ export async function worklist(ctx) {
     <div class="toolbar">
       ${segmented([
         can('tests.perform') && { key: 'mine', label: 'My tests', href: setQuery({ view: 'mine' }) },
-        { key: 'unassigned', label: 'Unassigned', href: setQuery({ view: 'unassigned' }) },
+        unassigned && { key: 'unassigned', label: unassigned.label, href: setQuery({ view: 'unassigned' }) },
         { key: 'all', label: 'All open', href: setQuery({ view: 'all' }) },
         { key: 'overdue', label: 'Overdue', href: setQuery({ view: 'overdue' }) },
         { key: 'review', label: 'In review', href: setQuery({ view: 'review' }) },
@@ -96,7 +101,7 @@ export async function worklist(ctx) {
       }
     },
     searchText: (r) => `${r.code} ${r.sample_code} ${r.sample_description} ${r.batch_no} ${r.method_code} ${r.method_title} ${r.client_name} ${r.analyst_name}`,
-    empty: emptyState({ icon: 'check', title: view === 'mine' ? 'Your worklist is clear' : 'No tests here', text: view === 'mine' ? 'Nothing is assigned to you right now.' : 'Nothing matches this view.', action: view === 'mine' ? html`<a class="btn" href="${setQuery({ view: 'unassigned' })}">See unassigned tests</a>` : '' }),
+    empty: emptyState({ icon: 'check', title: view === 'mine' ? 'Your worklist is clear' : 'No tests here', text: view === 'mine' ? 'Nothing is assigned to you right now.' : 'Nothing matches this view.', action: view === 'mine' ? html`<a class="btn" href="${setQuery({ view: 'unassigned' })}">${canAssign ? 'See unassigned tests' : 'See tests to pick up'}</a>` : '' }),
     columns: [
       { key: 'code', label: 'Test', sort: (r) => r.id, render: (r) => html`<a class="code" href="/tests/${r.id}">${r.code}</a>` },
       { key: 'sample_code', label: 'Sample', sort: true, render: (r) => html`<span class="code">${r.sample_code}</span><span class="sub-line">${r.sample_description}${r.batch_no ? ` · ${r.batch_no}` : ''}</span>` },

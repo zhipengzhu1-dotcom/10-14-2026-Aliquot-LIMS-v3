@@ -2,10 +2,10 @@
 
 import { all, get, ph } from '../db.js';
 import { can } from '../auth.js';
-import { SAMPLE_OPEN, INTAKE_ACCEPTED, rolesWith } from '../lookups.js';
+import { SAMPLE_OPEN, rolesWith } from '../lookups.js';
 import { today, addDays, now, localDate } from '../util.js';
 import { queued } from '../http.js';
-import { TEST_SELECT, TEST_OPEN, TEST_QUEUES, TEST_RULES, TEST_RETURNED } from '../workflow.js';
+import { TEST_SELECT, TEST_OPEN, TEST_QUEUES, TEST_RULES, TEST_RETURNED, unassignedWork } from '../workflow.js';
 import { TEST_WORK } from '../test-work.js';
 import { INVESTIGATION_OPEN } from '../investigations.js';
 import { ENTRY_QUEUES, ENTRY_RULES } from '../notebook.js';
@@ -40,13 +40,14 @@ export default function routes(r) {
     const kpis = get(`SELECT
       (SELECT COUNT(*) FROM samples WHERE status IN (${ph(SAMPLE_OPEN)})) AS samples_in_lab,
       (SELECT COUNT(*) FROM samples WHERE received_at >= ?) AS received_7d,
-      (SELECT COUNT(*) FROM tests t JOIN samples s ON s.id = t.sample_id WHERE t.analyst_id IS NULL AND t.status = 'Pending' AND s.intake = ?) AS unassigned,
       (SELECT COUNT(*) FROM investigations v WHERE ${INVESTIGATION_OPEN}) AS open_investigations,
       (SELECT COUNT(*) FROM samples WHERE reported_at >= ?) AS reported_90d,
       (SELECT COUNT(*) FROM samples WHERE reported_at >= ? AND substr(reported_at, 1, 10) <= due_date) AS on_time_90d,
       (SELECT AVG(julianday(reported_at) - julianday(received_at)) FROM samples WHERE reported_at >= ?) AS avg_tat_90d`,
-    ...SAMPLE_OPEN, new Date(Date.parse(`${addDays(t, -7)}T00:00:00`)).toISOString(), INTAKE_ACCEPTED, since90, since90, since90);
-
+    ...SAMPLE_OPEN, new Date(Date.parse(`${addDays(t, -7)}T00:00:00`)).toISOString(), since90, since90, since90);
+    // The person's own unassigned Tests, the same ones their Worklist lists, and which Queue they came from.
+    const unassigned = unassignedWork(me);
+    kpis.unassigned = { queue: unassigned.queue, n: unassigned.tests.length };
     // Each count of Test work is the length of the Worklist view its tile links to.
     const open = TEST_WORK.open();
     const overdue = TEST_WORK.overdue(open);

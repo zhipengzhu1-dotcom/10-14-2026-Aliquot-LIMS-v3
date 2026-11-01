@@ -36,6 +36,10 @@ _Avoid_: Procedure, assay, SOP
 One application of a Method to one Sample, carried from assignment through performed, reviewed and approved. Belongs to the Samples module: Worklist and Reviews & approvals are queues of Tests, not their owners.
 _Avoid_: Analysis, job
 
+**Worklist**:
+The screen of Tests waiting to be worked on. It holds three Queues: My tests (the person's assigned Tests), Unassigned (Tests with no analyst that the person may assign) and To pick up (Tests with no analyst that an analyst may take on, so only on Methods they are qualified for). Its other views, All open, Overdue and In review, are lab-wide lists of Tests, not Queues.
+_Avoid_: To-do list, job list
+
 **Intake review**:
 The decision, taken per Sample between receipt and assignment, whether the lab will test it: accept it, put it on hold with a reason, or reject it with a reason. Until a Sample is accepted its Tests cannot be assigned. A Sample accepted after its request was adjusted during review, by an edit or a Test added or cancelled, is accepted with changes.
 _Avoid_: Triage, login review, accessioning

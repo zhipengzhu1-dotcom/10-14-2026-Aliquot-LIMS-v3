@@ -45,6 +45,8 @@ export async function render(ctx) {
   const onTime = k.reported_90d ? Math.round((k.on_time_90d / k.reported_90d) * 100) : null;
   const returned = new Set(d.myReturned);
   const showWork = can('tests.perform');
+  // The person's own unassigned Tests: an analyst's are the ones they may pick up.
+  const unassigned = k.unassigned.n ? `${k.unassigned.n} ${k.unassigned.queue === 'claimable' ? 'to pick up' : 'unassigned'}` : '';
 
   const today = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
 
@@ -60,7 +62,7 @@ export async function render(ctx) {
     <div class="kpi-band">
     <div class="kpis">
       ${kpi({ label: 'Samples in the lab', value: num(k.samples_in_lab), sub: html`<b>${k.received_7d}</b> received in the last 7 days`, href: '/samples?status=open', ic: 'tube' })}
-      ${kpi({ label: 'Tests to do', value: num(k.tests_open), sub: k.tests_overdue ? html`<b class="bad-text">${k.tests_overdue} overdue</b>${k.unassigned ? html` · ${k.unassigned} unassigned` : ''}` : k.unassigned ? `${k.unassigned} unassigned` : 'None overdue', href: '/worklist?view=all', ic: 'worklist', tone: k.tests_overdue ? 'warn' : '' })}
+      ${kpi({ label: 'Tests to do', value: num(k.tests_open), sub: k.tests_overdue ? html`<b class="bad-text">${k.tests_overdue} overdue</b>${unassigned ? ` · ${unassigned}` : ''}` : unassigned || 'None overdue', href: '/worklist?view=all', ic: 'worklist', tone: k.tests_overdue ? 'warn' : '' })}
       ${kpi({ label: 'Awaiting review / approval', value: html`${k.awaiting_review}<span class="muted" style="font-weight:500"> / ${k.awaiting_approval}</span>`, sub: 'Peer review · QA approval', href: '/worklist?view=review', ic: 'review' })}
       ${kpi({ label: 'Open investigations', value: num(k.open_investigations), sub: 'OOS, deviations, incidents', href: '/investigations?status=open', ic: 'alert', tone: k.open_investigations ? 'alert' : '' })}
       ${kpi({ label: 'On-time delivery', value: onTime == null ? '—' : `${onTime}%`, sub: `${k.reported_90d} CoAs in 90 days · avg ${k.avg_tat_90d ? k.avg_tat_90d.toFixed(1) : '—'} days`, href: can('insights.view') ? '/insights' : null, ic: 'clock', tone: onTime != null && onTime < 85 ? 'warn' : '' })}
@@ -90,7 +92,7 @@ export async function render(ctx) {
               ${priorityBadge(t.priority)}
               ${statusBadge(t.status)}
               ${dueChip(t.due_date)}
-            </li>`)}</ul>` : emptyState({ icon: 'check', title: 'Nothing assigned to you', text: 'Pick up unassigned tests from the worklist.', action: html`<a class="btn sm" href="/worklist?view=unassigned">Unassigned tests</a>` }),
+            </li>`)}</ul>` : emptyState({ icon: 'check', title: 'Nothing assigned to you', text: 'Pick up unassigned tests from the worklist.', action: html`<a class="btn sm" href="/worklist?view=unassigned">${can('tests.assign') ? 'Unassigned tests' : 'Tests to pick up'}</a>` }),
         }) : ''}
 
         ${d.myDrafts.length ? card({

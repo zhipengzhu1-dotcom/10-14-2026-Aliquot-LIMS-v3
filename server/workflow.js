@@ -8,7 +8,7 @@
 
 import { all, get, run, ph, tx } from './db.js';
 import { update, mustGet } from './repo.js';
-import { bad, forbidden, guard } from './http.js';
+import { bad, forbidden, guard, queued } from './http.js';
 import { can, verifySignature, applySignature } from './auth.js';
 import { SAMPLE_OPEN, SIGNATURE_MEANINGS, INTAKE_PENDING, INTAKE_HOLD, INTAKE_ACCEPTED, priorityRank } from './lookups.js';
 import { clean, nowIso, today, idList, round, sameValue, fixed, specText } from './util.js';
@@ -522,6 +522,9 @@ export function cancelTest(ctx, id, reason) {
   return { ok: true };
 }
 
+const unassignedStage = () => all(`${TEST_SELECT} WHERE t.analyst_id IS NULL AND t.status IN (${ph(TEST_EDITABLE)})
+  ORDER BY ${priorityRank('s.priority')}, t.due_date, t.id`, ...TEST_EDITABLE);
+
 export const TEST_QUEUES = {
   assigned: {
     rule: 'edit',
@@ -531,4 +534,23 @@ export const TEST_QUEUES = {
   review: { rule: 'review', stage: () => all(`${TEST_SELECT} WHERE t.status = 'Submitted' ORDER BY t.submitted_at, t.id`) },
   // An approver may still return a Test held by an open Investigation, so it stays in their Queue.
   approval: { rule: 'return', stage: () => all(`${TEST_SELECT} WHERE t.status = 'Reviewed' ORDER BY t.reviewed_at, t.id`) },
+  // `assignable`: every Test the person may assign or reassign; the Worklist's Unassigned view limits it to the ones
+  // nobody holds. `claimable`: the Tests nobody holds that an analyst may pick up, its To pick up view.
+  assignable: {
+    rule: 'assign',
+    stage: () => all(`${TEST_SELECT} WHERE t.status IN (${ph(TEST_EDITABLE)}) ORDER BY ${priorityRank('s.priority')}, t.due_date, t.id`, ...TEST_EDITABLE),
+  },
+  claimable: { rule: 'claim', stage: unassignedStage },
 };
+
+/**
+ * The unassigned Tests `person` sees, and from where: the Queue they assign from limited to the Tests nobody holds,
+ * else the one they pick up from, else for oversight the stage, which is nobody's Queue. `queue` is null for someone
+ * who sees none.
+ */
+export function unassignedWork(person) {
+  if (can(person, 'tests.assign')) return { queue: 'assignable', tests: queued(TEST_RULES, TEST_QUEUES.assignable, person).filter((t) => !t.analyst_id) };
+  if (can(person, 'tests.perform')) return { queue: 'claimable', tests: queued(TEST_RULES, TEST_QUEUES.claimable, person) };
+  if (can(person, 'work.oversee')) return { queue: 'stage', tests: unassignedStage() };
+  return { queue: null, tests: [] };
+}
