@@ -130,7 +130,7 @@ test('a Sample leaves Pending review when accepted, and then waits under Ready t
   assert.ok(s, 'an Accepted Sample with Tests to assign is Ready to assign');
   assert.equal(s.can.assign, true);
   assert.equal(s.can.accept, false);
-  assert.match(s.locks.accept, /already accepted/i, 'the screen can say why accept is disabled');
+  assert.deepEqual(s.locks, { assign: null }, 'Ready to assign shows only assign, not the accept and reject it would always refuse');
 
   await priya.ok('POST', '/api/tests/assign', { test_ids: (await priya.ok('GET', `/api/samples/${id}`)).assignable, analyst_id: lab.analyst });
   assert.ok(!idsOf(await queue(priya, '?tab=ready')).includes(id), 'every Test assigned: nothing left to assign');

@@ -115,7 +115,8 @@ test('holding a Pending review Sample needs a reason, moves it to the On hold ta
   const hold = await priya.ok('GET', '/api/intake?tab=hold');
   assert.deepEqual(hold.groups.flatMap((g) => g.samples.map((s) => s.id)), [id]);
   assert.equal(hold.groups[0].samples[0].can.release, true);
-  assert.match(hold.groups[0].samples[0].locks.hold, /already on hold/i);
+  assert.equal(hold.groups[0].samples[0].can.hold, false);
+  assert.deepEqual(Object.keys(hold.groups[0].samples[0].locks), ['accept', 'release', 'reject'], 'On hold shows release, not hold');
   const pending = await priya.ok('GET', '/api/intake?tab=pending');
   assert.ok(!pending.groups.flatMap((g) => g.samples.map((s) => s.id)).includes(id), 'no longer on the Pending review tab');
   assert.equal(pending.counts.hold, 1);

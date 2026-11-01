@@ -249,7 +249,7 @@ test('the review screen offers assign where the rule allows it and says which st
   const accepted = find(await priya.ok('GET', '/api/intake?tab=ready'), ready.id);
 
   assert.equal(pending.can.assign, false);
-  assert.match(pending.locks.assign, /not been accepted at intake review/);
+  assert.equal(Object.hasOwn(pending.locks, 'assign'), false, 'Pending review does not show assign, which it would always refuse');
   assert.equal(accepted.can.assign, true);
   assert.equal(accepted.locks.assign, null);
   const tom = await staff('tom.fletcher');
