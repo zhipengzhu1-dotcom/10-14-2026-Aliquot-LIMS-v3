@@ -13,7 +13,8 @@ import { acceptSample } from './routes/intake.js';
 import { assignTests, startTest, saveResults, submitTest, reviewTest, approveTest, issueReport } from './workflow.js';
 import { createMethod, setMethodStatus, newMethodVersion, createInstrument, logInstrument, createInventory } from './routes/resources.js';
 import { createClient, createProject, setProjectStatus, createInvoice, setInvoiceStatus } from './routes/business.js';
-import { createPortalAccount, submitSamples, submitRequest, acknowledgeSubmission, receiveSubmission, respondToRequest, createThread, postMessage } from './routes/portal.js';
+import { createPortalAccount, submitSamples, submitRequest, acknowledgeSubmission, receiveSubmission, respondToRequest } from './routes/portal.js';
+import { createThread, postMessage } from './portal-threads.js';
 import { createDocument, addVersion } from './routes/documents.js';
 import { makeXlsx, makeDocx } from './ooxml.js';
 import {

@@ -14,7 +14,8 @@ import { assertCan, can, checkPasswordPolicy, hashPassword, verifyPassword } fro
 import { portalAuth, portalLogin, portalLogout, portalCtx, publicPortalUser, portalDestroyOtherSessions } from '../portal-auth.js';
 import { getSettings } from '../settings.js';
 import { SAMPLE_TYPES, STORAGE_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, TECHNIQUES, SAMPLE_OPEN } from '../lookups.js';
-import { clean, nowIso, idList, addDays, today, specText, fixed } from '../util.js';
+import { clean, nowIso, idList, addDays, today, specText, fixed, longDate } from '../util.js';
+import { createThread, postMessage, notice } from '../portal-threads.js';
 import { receiveSamples } from './lab.js';
 import { checkSubmission, submissionContext, clientMethods, openProjects } from '../submission-gate.js';
 import { assistantSetting, draftSubmission, modelLabel, readChoice, CHOICES } from '../assistant.js';
@@ -44,36 +45,8 @@ function tempPassword() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Threads & messages (shared by both sides)
+// Threads & messages (shared by both sides). Threads are written in ../portal-threads.js; these read them.
 // ---------------------------------------------------------------------------------------------
-
-export function createThread({ client_id, subject, submission_id = null, request_id = null, sample_id = null }) {
-  const t = nowIso();
-  return Number(run(
-    'INSERT INTO portal_threads (client_id, subject, submission_id, request_id, sample_id, created_at, last_message_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    client_id, subject, submission_id, request_id, sample_id, t, t,
-  ).lastInsertRowid);
-}
-
-export function postMessage(threadId, { portalUser = null, user = null, body, kind = 'message' }) {
-  const text = String(body ?? '').trim();
-  if (!text) throw bad('Write a message first');
-  if (text.length > 10000) throw bad('That message is too long (max 10 000 characters)');
-  const t = nowIso();
-  const author = portalUser ? portalUser.full_name : user ? user.full_name : getSettings().lab_name;
-  run('INSERT INTO portal_messages (thread_id, portal_user_id, user_id, author_name, body, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    threadId, portalUser?.id ?? null, user?.id ?? null, author, text, kind, t);
-  // Whoever writes has, by definition, read the thread up to now.
-  if (portalUser) run('UPDATE portal_threads SET last_message_at = ?, client_read_at = ?, status = ? WHERE id = ?', t, t, 'Open', threadId);
-  else if (user) run('UPDATE portal_threads SET last_message_at = ?, lab_read_at = ? WHERE id = ?', t, t, threadId);
-  else run('UPDATE portal_threads SET last_message_at = ? WHERE id = ?', t, threadId);
-}
-
-/** System notice (status changes) posted into the thread linked to a submission or request. */
-function notice(where, body) {
-  const thread = get(`SELECT id FROM portal_threads WHERE ${where.submission_id ? 'submission_id' : 'request_id'} = ?`, where.submission_id || where.request_id);
-  if (thread) postMessage(thread.id, { body, kind: 'event' });
-}
 
 const CLIENT_UNREAD = `EXISTS (SELECT 1 FROM portal_messages m WHERE m.thread_id = t.id AND m.portal_user_id IS NULL AND m.created_at > COALESCE(t.client_read_at, ''))`;
 const LAB_UNREAD = `EXISTS (SELECT 1 FROM portal_messages m WHERE m.thread_id = t.id AND m.portal_user_id IS NOT NULL AND m.created_at > COALESCE(t.lab_read_at, ''))`;
@@ -260,8 +233,6 @@ export function acknowledgeSubmission(ctx, id, rawNote) {
     if (note && thread) postMessage(thread.id, { user: ctx.user, body: note });
   });
 }
-
-export const longDate = (date) => new Date(`${date}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
 /** The arrival notice's completion line: one date, or each tier's date and samples when a shipment mixes them. */
 function dueSummary(samples) {
