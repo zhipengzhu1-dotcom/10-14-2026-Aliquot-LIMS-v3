@@ -113,9 +113,8 @@ test('each analyst row agrees with the Tests list', async () => {
     assert.equal(a.due_week, dueWeekBy.get(a.id) || 0, `${a.full_name}: due in 7 days`);
   }
   assert.ok(w.analysts.some((a) => a.overdue > 0) && w.analysts.some((a) => a.due_week > 0), 'the demo lab has overdue and due-soon work to compare');
-  // The Unassigned view and the count both leave out Tests on a Sample still waiting for intake review.
-  const unassignedList = await lab.priya.ok('GET', '/api/tests?scope=open&unassigned=1&limit=3000');
-  assert.equal(w.unassigned, unassignedList.filter((t) => t.status === 'Pending').length, 'unassigned');
+  // The count is the manager's assignable Queue limited to Tests with no analyst, In Progress ones included.
+  assert.equal(w.unassigned, (await lab.priya.ok('GET', '/api/tests?work=assignable&unassigned=1&limit=3000')).length, 'unassigned');
 
   const performers = (await lab.priya.ok('GET', '/api/lookups')).testPerformerRoles;
   const expected = Object.values(lab.users).filter((u) => u.active && performers.includes(u.role)).map((u) => u.id).sort((x, y) => x - y);

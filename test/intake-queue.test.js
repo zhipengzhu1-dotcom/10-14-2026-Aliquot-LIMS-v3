@@ -245,8 +245,8 @@ test('Tests on a Sample waiting for review are not counted as unassigned work, a
   const priya = await staff('priya.raman');
   const [id] = await receive(['Unassigned gap']);
   const { tests } = await priya.ok('GET', `/api/samples/${id}`);
-  const unassigned = async () => (await priya.ok('GET', '/api/tests?unassigned=1&limit=3000')).map((t) => t.id);
-  const counts = async () => [(await priya.ok('GET', '/api/dashboard')).kpis.unassigned, (await priya.ok('GET', '/api/workload')).unassigned];
+  const unassigned = async () => (await priya.ok('GET', '/api/tests?work=assignable&unassigned=1&limit=3000')).map((t) => t.id);
+  const counts = async () => [(await priya.ok('GET', '/api/dashboard')).kpis.unassigned.n, (await priya.ok('GET', '/api/workload')).unassigned];
 
   const before = await counts();
   assert.ok(!(await unassigned()).includes(tests[0].id), 'the Worklist Unassigned view leaves it out');
@@ -266,7 +266,7 @@ test('an analyst\'s Worklist lists no Test of a Sample that is Pending review or
   const [heldTest] = await testsOf(held);
 
   const listed = async (query) => (await tom.ok('GET', `/api/tests?${query}&limit=3000`)).map((t) => t.id);
-  for (const query of ['scope=open', 'scope=open&overdue=1', 'overdue=1', 'unassigned=1', 'work=assigned', `scope=open&method_id=${lab.kf}`]) {
+  for (const query of ['scope=open', 'scope=open&overdue=1', 'overdue=1', 'work=claimable', 'work=assigned', `scope=open&method_id=${lab.kf}`]) {
     const ids = await listed(query);
     assert.ok(!ids.includes(pendingTest), `${query} leaves out a Test of a Pending review Sample`);
     assert.ok(!ids.includes(heldTest), `${query} leaves out a Test of an On hold Sample`);

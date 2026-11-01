@@ -42,7 +42,7 @@ export async function list(ctx) {
     <div class="kpis">
       <a class="kpi" href="/worklist"><div class="k-label">${icon('worklist', { size: 14 })}Open tests</div><div class="k-value">${num(total('open'))}</div><div class="k-sub">${num(total('in_progress'))} in progress · ${num(total('due_week'))} due in 7 days</div></a>
       <a class="kpi ${overdue ? 'alert' : ''}" href="/worklist?view=overdue"><div class="k-label">${icon('clock', { size: 14 })}Overdue</div><div class="k-value">${num(overdue)}</div><div class="k-sub">Assigned and past their due date</div></a>
-      <a class="kpi ${d.unassigned ? 'warn' : ''}" href="/worklist?view=unassigned"><div class="k-label">${icon('inbox', { size: 14 })}Unassigned</div><div class="k-value">${num(d.unassigned)}</div><div class="k-sub">Pending tests with no analyst</div></a>
+      <a class="kpi ${d.unassigned ? 'warn' : ''}" href="/worklist?view=unassigned"><div class="k-label">${icon('inbox', { size: 14 })}Unassigned</div><div class="k-value">${num(d.unassigned)}</div><div class="k-sub">Tests with no analyst</div></a>
       <div class="kpi ${returned ? 'warn' : ''}"><div class="k-label">${icon('undo', { size: 14 })}Returned</div><div class="k-value">${num(returned)}</div><div class="k-sub">Sent back by a reviewer or QA</div></div>
     </div>
     <div class="toolbar">${legend}<span class="spacer"></span><span class="muted small">${plural(d.analysts.length, 'analyst')}</span>${searchBox('Filter analysts…')}</div>
