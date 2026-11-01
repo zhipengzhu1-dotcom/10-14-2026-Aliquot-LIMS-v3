@@ -30,6 +30,9 @@ export function addBusinessDays(date, n) {
   return localDate(d);
 }
 
+/** A date as the client reads it in a message, e.g. "3 Nov 2026". */
+export const longDate = (date) => new Date(`${date}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
 export function diffDays(from, to) {
   const a = Date.parse(`${String(from).slice(0, 10)}T12:00:00`);
   const b = Date.parse(`${String(to).slice(0, 10)}T12:00:00`);

@@ -32,8 +32,8 @@ export async function newUser() {
 export async function list(ctx) {
   ctx.title('Team');
   const users = await api.get('/api/users');
-  const open = await api.get('/api/tests', { scope: 'open' });
-  const openBy = (id) => open.filter((t) => t.analyst_id === id && ['Pending', 'In Progress'].includes(t.status)).length;
+  const open = await api.get('/api/tests', { scope: 'open', limit: 3000 });
+  const openBy = (id) => open.filter((t) => t.analyst_id === id).length;
   ctx.el.innerHTML = String(html`
     ${pageHead({
       title: 'Team & training',

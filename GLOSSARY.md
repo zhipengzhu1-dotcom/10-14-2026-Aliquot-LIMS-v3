@@ -64,6 +64,10 @@ _Avoid_: CAPA (one stage of an Investigation), ticket
 The Investigation that opens by itself when a Test is submitted with a result out of specification.
 _Avoid_: OOS form, deviation
 
+**Open Test**:
+A Test still to be performed: Pending or In Progress, on a Sample accepted at intake review. The Dashboard's Tests to do, the Worklist's All open and each analyst's open count are the same open Tests, counted lab-wide whoever looks. A Submitted or Reviewed Test is in review, not open; overdue means open and past its due date.
+_Avoid_: Active test, test to do (for the record itself)
+
 **Certificate of Analysis (CoA)**:
 The QA-signed statement of a Sample's approved results, issued to the client.
 _Avoid_: Report, certificate

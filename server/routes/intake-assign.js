@@ -10,6 +10,7 @@ import { can } from '../auth.js';
 import { rolesWith } from '../lookups.js';
 import { clean, idList } from '../util.js';
 import { TEST_EDITABLE, TEST_RULES, TEST_SELECT, SAMPLE_RULES, assignBlocker, isQualified } from '../workflow.js';
+import { TEST_WORK } from '../test-work.js';
 
 /** One outcome line, naming the Test `t` and its Sample (or only `sample`, or only a Test id) as far as they are known. */
 const outcome = (t, sample, result) => ({
@@ -79,10 +80,9 @@ export function assignOptions(ctx, sampleIds) {
   }));
   const methods = [...new Map(tests.map((t) => [t.method_code, { code: t.method_code, title: t.method_title }])).values()];
   const performers = rolesWith('tests.perform');
-  const analysts = all(`SELECT u.id, u.full_name, u.initials, u.title, u.role,
-      (SELECT COUNT(*) FROM tests t WHERE t.analyst_id = u.id AND t.status IN (${ph(TEST_EDITABLE)})) AS open
-    FROM users u WHERE u.active = 1 AND u.role IN (${ph(performers)}) ORDER BY u.full_name`, ...TEST_EDITABLE, ...performers)
-    .map((u) => ({ ...u, qualified: Object.fromEntries(methods.map((m) => [m.code, isQualified(u.id, m.code)])) }));
+  const open = TEST_WORK.open();
+  const analysts = all(`SELECT id, full_name, initials, title, role FROM users WHERE active = 1 AND role IN (${ph(performers)}) ORDER BY full_name`, ...performers)
+    .map((u) => ({ ...u, open: TEST_WORK.load(u.id, open).length, qualified: Object.fromEntries(methods.map((m) => [m.code, isQualified(u.id, m.code)])) }));
   return { tests, methods, analysts };
 }
 

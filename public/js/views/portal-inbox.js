@@ -159,10 +159,10 @@ async function newThread(prefill = {}) {
 // ---------------------------------------------------------------------------------------------
 
 async function submissionsTab(ctx, body, tools) {
-  const status = ctx.query.status || 'open';
+  const status = ctx.query.status || 'incoming';
   const rows = await api.get('/api/portal-admin/submissions', { status });
   tools.innerHTML = String(html`${segmented([
-    { key: 'open', label: 'Open', href: setQuery({ status: null }) },
+    { key: 'incoming', label: 'Incoming', href: setQuery({ status: null }) },
     { key: 'Received', label: 'Received', href: setQuery({ status: 'Received' }) },
     { key: 'all', label: 'All', href: setQuery({ status: 'all' }) },
   ], status)} ${searchBox('Filter…')}`);
@@ -171,7 +171,7 @@ async function submissionsTab(ctx, body, tools) {
     rows,
     rowHref: (r) => `/portal-inbox/submissions/${r.id}`,
     searchText: (r) => `${r.code} ${r.client_name} ${r.submitted_by} ${r.courier} ${r.tracking_no}`,
-    empty: emptyState({ icon: 'package', title: status === 'open' ? 'No submissions waiting' : 'Nothing here', text: 'Clients announce shipments from the portal; acknowledge them here and receive them when the parcel arrives.' }),
+    empty: emptyState({ icon: 'package', title: status === 'incoming' ? 'No submissions waiting' : 'Nothing here', text: 'Clients announce shipments from the portal; acknowledge them here and receive them when the parcel arrives.' }),
     columns: [
       { key: 'code', label: 'Ref', sort: (r) => r.id, render: (r) => html`<a class="code" href="/portal-inbox/submissions/${r.id}">${r.code}</a>` },
       { key: 'client_name', label: 'Client', sort: true, cls: 'title-cell', render: (r) => html`<strong>${r.client_name}</strong><span class="sub-line">${r.submitted_by || ''}</span>` },

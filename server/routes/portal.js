@@ -14,15 +14,17 @@ import { assertCan, can, checkPasswordPolicy, hashPassword, verifyPassword } fro
 import { portalAuth, portalLogin, portalLogout, portalCtx, publicPortalUser, portalDestroyOtherSessions } from '../portal-auth.js';
 import { getSettings } from '../settings.js';
 import { SAMPLE_TYPES, STORAGE_CONDITIONS, STAGES, PRIORITIES, PRIORITY_TIERS, DEFAULT_PRIORITY, TECHNIQUES, SAMPLE_OPEN } from '../lookups.js';
-import { clean, nowIso, idList, addDays, today, specText, fixed } from '../util.js';
-import { receiveSamples } from './lab.js';
+import { clean, nowIso, addDays, today, specText, fixed } from '../util.js';
 import { checkSubmission, submissionContext, clientMethods, openProjects } from '../submission-gate.js';
+import { createThread, postMessage, notice } from '../portal-threads.js';
+import {
+  SUBMISSION_STATUSES, SUBMISSION_OPEN, SUBMISSION_RULES, CLIENT_SUBMISSION_RULES, SUBMISSION_QUEUES, SUBMISSION_LIST, SUBMISSION_COUNTS,
+  submitSamples, moveSubmission,
+} from '../submissions.js';
 import { assistantSetting, draftSubmission, modelLabel, readChoice, CHOICES } from '../assistant.js';
 import { createProject } from './business.js';
 import { previewXlsx } from '../ooxml.js';
 
-export const SUBMISSION_STATUSES = ['Submitted', 'Acknowledged', 'Received', 'Declined', 'Withdrawn'];
-export const SUBMISSION_OPEN = ['Submitted', 'Acknowledged'];
 export const REQUEST_TYPES = ['Method development', 'Method validation', 'Method transfer', 'Other'];
 export const REQUEST_STATUSES = ['Submitted', 'Under review', 'Proposal sent', 'Accepted', 'Declined'];
 export const REQUEST_OPEN = ['Submitted', 'Under review', 'Proposal sent'];
@@ -44,36 +46,8 @@ function tempPassword() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Threads & messages (shared by both sides)
+// Threads & messages (shared by both sides). Threads are written in ../portal-threads.js; these read them.
 // ---------------------------------------------------------------------------------------------
-
-export function createThread({ client_id, subject, submission_id = null, request_id = null, sample_id = null }) {
-  const t = nowIso();
-  return Number(run(
-    'INSERT INTO portal_threads (client_id, subject, submission_id, request_id, sample_id, created_at, last_message_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    client_id, subject, submission_id, request_id, sample_id, t, t,
-  ).lastInsertRowid);
-}
-
-export function postMessage(threadId, { portalUser = null, user = null, body, kind = 'message' }) {
-  const text = String(body ?? '').trim();
-  if (!text) throw bad('Write a message first');
-  if (text.length > 10000) throw bad('That message is too long (max 10 000 characters)');
-  const t = nowIso();
-  const author = portalUser ? portalUser.full_name : user ? user.full_name : getSettings().lab_name;
-  run('INSERT INTO portal_messages (thread_id, portal_user_id, user_id, author_name, body, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    threadId, portalUser?.id ?? null, user?.id ?? null, author, text, kind, t);
-  // Whoever writes has, by definition, read the thread up to now.
-  if (portalUser) run('UPDATE portal_threads SET last_message_at = ?, client_read_at = ?, status = ? WHERE id = ?', t, t, 'Open', threadId);
-  else if (user) run('UPDATE portal_threads SET last_message_at = ?, lab_read_at = ? WHERE id = ?', t, t, threadId);
-  else run('UPDATE portal_threads SET last_message_at = ? WHERE id = ?', t, threadId);
-}
-
-/** System notice (status changes) posted into the thread linked to a submission or request. */
-function notice(where, body) {
-  const thread = get(`SELECT id FROM portal_threads WHERE ${where.submission_id ? 'submission_id' : 'request_id'} = ?`, where.submission_id || where.request_id);
-  if (thread) postMessage(thread.id, { body, kind: 'event' });
-}
 
 const CLIENT_UNREAD = `EXISTS (SELECT 1 FROM portal_messages m WHERE m.thread_id = t.id AND m.portal_user_id IS NULL AND m.created_at > COALESCE(t.client_read_at, ''))`;
 const LAB_UNREAD = `EXISTS (SELECT 1 FROM portal_messages m WHERE m.thread_id = t.id AND m.portal_user_id IS NOT NULL AND m.created_at > COALESCE(t.lab_read_at, ''))`;
@@ -131,43 +105,6 @@ function submissionView(sub, { forClient }) {
 // Services (also used by the demo seed)
 // ---------------------------------------------------------------------------------------------
 
-const closedSubmission = (sub) => (SUBMISSION_OPEN.includes(sub.status) ? undefined : bad(`This submission is ${sub.status.toLowerCase()}`));
-
-export const SUBMISSION_RULES = {
-  acknowledge(sub, me) {
-    if (!can(me, 'portal.respond')) return forbidden();
-    if (sub.status === 'Acknowledged') return bad('Already acknowledged');
-    return closedSubmission(sub);
-  },
-  decline(sub, me) {
-    if (!can(me, 'portal.respond')) return forbidden();
-    return closedSubmission(sub);
-  },
-  receive(sub, me) {
-    if (!can(me, 'samples.receive')) return forbidden();
-    return closedSubmission(sub);
-  },
-};
-
-const SUBMISSION_LIST = `SELECT su.id, su.code, su.status, su.priority, su.sample_type, su.courier, su.tracking_no, su.ship_date, su.created_at, su.updated_at,
-    json_array_length(su.samples) AS sample_count, json_array_length(su.method_ids) AS method_count,
-    c.id AS client_id, c.name AS client_name, c.code AS client_code, pu.full_name AS submitted_by
-  FROM portal_submissions su JOIN clients c ON c.id = su.client_id LEFT JOIN portal_users pu ON pu.id = su.portal_user_id`;
-
-// `incoming`: Receiving & Review's Incoming tab, the open Submissions whose parcel is still to be received, oldest first.
-export const SUBMISSION_QUEUES = {
-  incoming: { rule: 'receive', stage: () => all(`${SUBMISSION_LIST} WHERE su.status IN (${ph(SUBMISSION_OPEN)}) ORDER BY su.id`, ...SUBMISSION_OPEN) },
-};
-
-// The client's own actions take the signed-in portal user, never a staff user. Another client's submission is
-// refused as not found, so a contact cannot learn that it exists.
-export const CLIENT_SUBMISSION_RULES = {
-  withdraw(sub, pu) {
-    if (sub.client_id !== pu.client_id) return notFound('Submission');
-    if (sub.status !== 'Submitted') return bad(`This submission is ${sub.status.toLowerCase()} — contact the laboratory to change it`);
-  },
-};
-
 // A request moves only forward, one action per status it moves to. A response that changes no status is a reply.
 const REQUEST_MOVES = {
   review: { from: ['Submitted'], to: 'Under review' },
@@ -199,8 +136,6 @@ export const REQUEST_RULES = {
   },
 };
 
-const getSubmission = (id) => mustGet('SELECT * FROM portal_submissions WHERE id = ?', id, 'Submission');
-
 /** Invites a client contact. Returns a one-time temporary password (shown once to staff, never stored in clear). */
 export function createPortalAccount(ctx, input, presetPassword = null) {
   assertCan(ctx, 'portal.manage');
@@ -212,25 +147,6 @@ export function createPortalAccount(ctx, input, presetPassword = null) {
     ...b, password_hash: hashPassword(password), must_change_password: presetPassword ? 0 : 1, active: 1, created_by: ctx.user.id, created_at: nowIso(),
   }, { code: b.email, summary: `Client portal account created for ${b.full_name}` });
   return { id, email: b.email, temp_password: password };
-}
-
-/** A client contact announces a shipment. ctx is a portal audit context (see portalCtx). */
-export function submitSamples(ctx, pu, input) {
-  const gate = checkSubmission(submissionContext(pu.client_id), input);
-  if (!gate.ok) throw bad(gate.problems[0].message);
-  const { samples: rows, method_ids: methodIds, ...b } = gate.submission;
-  return tx(() => {
-    const code = nextCode('SUB');
-    const t = nowIso();
-    const id = insert(ctx, 'portal_submissions', {
-      code, client_id: pu.client_id, portal_user_id: pu.id, ...b, samples: JSON.stringify(rows), method_ids: JSON.stringify(methodIds),
-      status: 'Submitted', created_at: t, updated_at: t,
-    }, { summary: `Sample submission from ${pu.full_name} (${rows.length} sample${rows.length === 1 ? '' : 's'})` });
-    const thread = createThread({ client_id: pu.client_id, subject: `Sample submission ${code}`, submission_id: id });
-    postMessage(thread, { body: `Submission ${code} received: ${rows.length} sample${rows.length === 1 ? '' : 's'}${methodIds.length ? `, ${methodIds.length} test${methodIds.length === 1 ? '' : 's'} requested` : ''}. We'll confirm as soon as it has been reviewed.`, kind: 'event' });
-    if (b.notes) postMessage(thread, { portalUser: pu, body: b.notes });
-    return { id, code };
-  });
 }
 
 /** A client contact asks for method development / validation / transfer work. */
@@ -246,58 +162,6 @@ export function submitRequest(ctx, pu, input) {
     const thread = createThread({ client_id: pu.client_id, subject: `${b.type}: ${b.title}`, request_id: id });
     postMessage(thread, { body: `Request ${code} received. A scientist will review the scope and come back to you, usually within two working days.`, kind: 'event' });
     return { id, code };
-  });
-}
-
-export function acknowledgeSubmission(ctx, id, rawNote) {
-  const sub = getSubmission(id);
-  guard(SUBMISSION_RULES.acknowledge(sub, ctx.user));
-  const note = String(rawNote || '').trim();
-  tx(() => {
-    update(ctx, 'portal_submissions', sub.id, { status: 'Acknowledged', status_note: note || null, acknowledged_by: ctx.user.id, acknowledged_at: nowIso(), updated_at: nowIso() }, { action: 'STATUS', summary: 'Submission acknowledged' });
-    notice({ submission_id: sub.id }, `Submission acknowledged by ${ctx.user.full_name} — we're expecting your shipment.`);
-    const thread = get('SELECT id FROM portal_threads WHERE submission_id = ?', sub.id);
-    if (note && thread) postMessage(thread.id, { user: ctx.user, body: note });
-  });
-}
-
-export const longDate = (date) => new Date(`${date}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-
-/** The arrival notice's completion line: one date, or each tier's date and samples when a shipment mixes them. */
-function dueSummary(samples) {
-  const dates = new Set(samples.map((s) => s.due_date));
-  if (dates.size === 1) return `Expected completion ${longDate(samples[0].due_date)}.`;
-  const tiers = Object.keys(PRIORITY_TIERS).map((tier) => [tier, samples.filter((s) => s.priority === tier)]).filter(([, list]) => list.length);
-  return `Expected completion: ${tiers.map(([tier, list]) => `${tier} ${longDate(list[0].due_date)} (${list.map((s) => s.code).join(', ')})`).join('; ')}.`;
-}
-
-/** Physical receipt: creates real samples (codes, custody, tests) through the normal receiving workflow. */
-export function receiveSubmission(ctx, id, input = {}) {
-  const sub = getSubmission(id);
-  guard(SUBMISSION_RULES.receive(sub, ctx.user));
-  clean(input, { priority: { type: 'enum', values: PRIORITIES } }, { partial: true });
-  const rows = json(sub.samples, []);
-  const methodIds = input.method_ids !== undefined ? idList(input.method_ids) : json(sub.method_ids, []);
-  return tx(() => {
-    const res = receiveSamples(ctx, {
-      client_id: sub.client_id,
-      project_id: input.project_id === undefined ? sub.project_id : input.project_id,
-      sample_type: input.sample_type ?? sub.sample_type,
-      storage: input.storage ?? sub.storage,
-      location: input.location,
-      condition: input.condition,
-      priority: input.priority ?? sub.priority,
-      received_at: input.received_at || nowIso(),
-      due_date: input.due_date,
-      notes: [input.notes, `Client submission ${sub.code}`].filter(Boolean).join('\n'),
-      samples: rows,
-      method_ids: methodIds,
-    }, { legacyTiers: true });
-    const ids = res.samples.map((s) => s.id);
-    update(ctx, 'portal_submissions', sub.id, { status: 'Received', received_by: ctx.user.id, received_at: nowIso(), sample_ids: JSON.stringify(ids), updated_at: nowIso() }, { action: 'STATUS', summary: `Samples received: ${res.samples.map((s) => s.code).join(', ')}` });
-    const condition = input.condition && input.condition !== 'Acceptable' ? ` Condition on receipt: ${input.condition}.` : '';
-    notice({ submission_id: sub.id }, `Your samples have arrived and are logged as ${res.samples.map((s) => s.code).join(', ')}.${condition} ${dueSummary(res.samples)}`);
-    return res;
   });
 }
 
@@ -534,13 +398,7 @@ export default function routes(r) {
 
   r.post('/api/portal/submissions/:id/withdraw', (ctx) => {
     const pu = portalAuth(ctx);
-    const sub = getSubmission(+ctx.params.id);
-    guard(CLIENT_SUBMISSION_RULES.withdraw(sub, pu));
-    tx(() => {
-      update(portalCtx(ctx, pu), 'portal_submissions', sub.id, { status: 'Withdrawn', updated_at: nowIso() }, { action: 'STATUS', summary: 'Withdrawn by the client' });
-      notice({ submission_id: sub.id }, `${pu.full_name} withdrew this submission.`);
-    });
-    return { ok: true };
+    return moveSubmission(portalCtx(ctx, pu), pu, +ctx.params.id, 'withdraw');
   }, open);
 
   // ----- Method development / validation requests -----
@@ -607,7 +465,7 @@ export default function routes(r) {
 
   r.get('/api/portal-admin/summary', () => ({
     unread: get(`SELECT COUNT(*) n FROM portal_threads t WHERE ${LAB_UNREAD}`).n,
-    submissions: get(`SELECT COUNT(*) n FROM portal_submissions WHERE status IN (${ph(SUBMISSION_OPEN)})`, ...SUBMISSION_OPEN).n,
+    submissions: SUBMISSION_COUNTS.open(),
     requests: get(`SELECT COUNT(*) n FROM portal_requests WHERE status IN (${ph(REQUEST_OPEN)})`, ...REQUEST_OPEN).n,
     accounts: get('SELECT COUNT(*) n FROM portal_users WHERE active = 1').n,
   }), staff);
@@ -651,13 +509,12 @@ export default function routes(r) {
   }, staff);
 
   // ----- Submissions -----
+  // `incoming` is the Incoming Queue's stage unfiltered, the oversight view of every open Submission; newest first.
   r.get('/api/portal-admin/submissions', (ctx) => {
-    const status = ctx.query.status || 'open';
-    const where = [];
-    const params = [];
-    if (status === 'open') { where.push(`su.status IN (${ph(SUBMISSION_OPEN)})`); params.push(...SUBMISSION_OPEN); }
-    else if (status !== 'all') { where.push('su.status = ?'); params.push(status); }
-    return all(`${SUBMISSION_LIST} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY su.id DESC LIMIT 500`, ...params);
+    const status = ctx.query.status || 'incoming';
+    if (status === 'incoming') return SUBMISSION_QUEUES.incoming.stage().reverse();
+    if (status !== 'all' && !SUBMISSION_STATUSES.includes(status)) throw bad(`Status must be incoming, all or one of: ${SUBMISSION_STATUSES.join(', ')}`);
+    return status === 'all' ? all(`${SUBMISSION_LIST} ORDER BY su.id DESC LIMIT 500`) : all(`${SUBMISSION_LIST} WHERE su.status = ? ORDER BY su.id DESC LIMIT 500`, status);
   }, staff);
 
   r.get('/api/portal-admin/submissions/:id', (ctx) => {
@@ -675,21 +532,9 @@ export default function routes(r) {
     };
   }, staff);
 
-  r.post('/api/portal-admin/submissions/:id/acknowledge', (ctx) => { acknowledgeSubmission(ctx, +ctx.params.id, ctx.body.note); return { ok: true }; }, staff);
-
-  r.post('/api/portal-admin/submissions/:id/decline', (ctx) => {
-    const sub = getSubmission(+ctx.params.id);
-    guard(SUBMISSION_RULES.decline(sub, ctx.user));
-    const reason = String(ctx.body.reason || '').trim();
-    if (!reason) throw bad('Give the client a reason', 'REASON_REQUIRED');
-    tx(() => {
-      update(ctx, 'portal_submissions', sub.id, { status: 'Declined', status_note: reason, updated_at: nowIso() }, { action: 'STATUS', summary: 'Submission declined', reason });
-      notice({ submission_id: sub.id }, `Submission declined by ${ctx.user.full_name}: ${reason}`);
-    });
-    return { ok: true };
-  }, staff);
-
-  r.post('/api/portal-admin/submissions/:id/receive', (ctx) => receiveSubmission(ctx, +ctx.params.id, ctx.body), staff);
+  for (const action of Object.keys(SUBMISSION_RULES)) {
+    r.post(`/api/portal-admin/submissions/:id/${action}`, (ctx) => moveSubmission(ctx, ctx.user, +ctx.params.id, action, ctx.body), staff);
+  }
 
   // ----- Method requests -----
   r.get('/api/portal-admin/requests', (ctx) => {
@@ -764,11 +609,10 @@ export default function routes(r) {
   }, staff);
 }
 
-/** Counts for the staff sidebar badge. */
+/** Counts for the staff sidebar badge: what is new, which is not a Queue (see SUBMISSION_COUNTS). */
 export function portalBadge(user) {
   if (!can(user, 'portal.view')) return 0;
-  return get(`SELECT
-      (SELECT COUNT(*) FROM portal_threads t WHERE ${LAB_UNREAD})
-    + (SELECT COUNT(*) FROM portal_submissions WHERE status = 'Submitted')
-    + (SELECT COUNT(*) FROM portal_requests WHERE status = 'Submitted') AS n`).n;
+  return get(`SELECT COUNT(*) n FROM portal_threads t WHERE ${LAB_UNREAD}`).n
+    + SUBMISSION_COUNTS.new()
+    + get(`SELECT COUNT(*) n FROM portal_requests WHERE status = 'Submitted'`).n;
 }
