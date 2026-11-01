@@ -376,6 +376,117 @@ test('messages: unread tracking on both sides; replies are plain text', async ()
   assert.equal((await felix.get(`/api/portal/threads/${id}`)).status, 404);
 });
 
+// ----- Submission moves -----
+
+// Each move, the statuses it is made from and the status it leads to, written out here rather than read from the server.
+const MOVES = {
+  acknowledge: { from: ['Submitted'], to: 'Acknowledged', by: 'priya.raman', body: { note: 'Expecting it Tuesday' }, notice: /^Submission acknowledged by Priya Raman — we're expecting your shipment\.$/ },
+  receive: { from: ['Submitted', 'Acknowledged'], to: 'Received', by: 'nadia.rossi', body: { condition: 'Temperature excursion' }, notice: /^Your samples have arrived and are logged as S-\S+\. Condition on receipt: Temperature excursion\. Expected completion / },
+  decline: { from: ['Submitted', 'Acknowledged'], to: 'Declined', by: 'priya.raman', body: { reason: 'We do not run that test' }, notice: /^Submission declined by Priya Raman: We do not run that test$/ },
+  withdraw: { from: ['Submitted'], to: 'Withdrawn', client: true, notice: /^Dr\. Laura Chen withdrew this submission\.$/ },
+};
+// The refusal for a move made from a status it does not start from.
+const refusalFor = (action, status) => {
+  if (action === 'withdraw') return `This submission is ${status.toLowerCase()} — contact the laboratory to change it`;
+  if (action === 'acknowledge' && status === 'Acknowledged') return 'Already acknowledged';
+  return `This submission is ${status.toLowerCase()}`;
+};
+const moveUrl = (action, id) => (MOVES[action].client ? `/api/portal/submissions/${id}/withdraw` : `/api/portal-admin/submissions/${id}/${action}`);
+const mover = (action) => (MOVES[action].client ? portal(LAURA) : staff(MOVES[action].by));
+
+async function announce(description = 'Move sweep') {
+  const laura = await portal(LAURA);
+  const [method] = (await laura.ok('GET', '/api/portal/lookups')).methods;
+  return laura.ok('POST', '/api/portal/submissions', { samples: [{ description }], method_ids: [method.id] });
+}
+
+/** A new Submission brought to `status` by the moves that lead there. */
+async function submissionIn(status) {
+  const { id } = await announce(`In ${status}`);
+  const path = { Submitted: [], Acknowledged: ['acknowledge'], Received: ['acknowledge', 'receive'], Declined: ['decline'], Withdrawn: ['withdraw'] }[status];
+  for (const action of path) await (await mover(action)).ok('POST', moveUrl(action, id), MOVES[action].body ?? {});
+  return id;
+}
+
+const lastEvent = async (id) => {
+  const { thread_id } = await manager.ok('GET', `/api/portal-admin/submissions/${id}`);
+  return (await manager.ok('GET', `/api/portal-admin/threads/${thread_id}`)).messages.filter((m) => m.kind === 'event').at(-1).body;
+};
+
+for (const [action, move] of Object.entries(MOVES)) {
+  test(`a Submission is ${move.to.toLowerCase()} only from ${move.from.join(' or ')}, with its audit entry and notice`, async () => {
+    for (const status of ['Submitted', 'Acknowledged', 'Received', 'Declined', 'Withdrawn']) {
+      const id = await submissionIn(status);
+      const before = await lastEvent(id);
+      const r = await (await mover(action)).post(moveUrl(action, id), move.body ?? {});
+      const after = (await manager.ok('GET', `/api/portal-admin/submissions/${id}`)).submission;
+      if (!move.from.includes(status)) {
+        assert.deepEqual([r.status, r.data.error], [400, refusalFor(action, status)], `${action} from ${status}`);
+        assert.equal(after.status, status, `${action} from ${status} leaves it ${status}`);
+        assert.equal(await lastEvent(id), before, `${action} from ${status} posts no notice`);
+        continue;
+      }
+      assert.ok(r.status < 300, `${action} from ${status}: ${r.status} ${JSON.stringify(r.data)}`);
+      assert.equal(after.status, move.to);
+      assert.match(await lastEvent(id), move.notice);
+      const [entry] = await (await staff('daniel.okafor')).ok('GET', `/api/audit?entity=portal_submissions&entity_id=${id}&action=STATUS&limit=1`);
+      assert.equal(JSON.parse(entry.changes).status[1], move.to, `${action} from ${status} is in the audit trail`);
+    }
+  });
+}
+
+test('a move is refused to a person without its permission, and a decline without a reason changes nothing', async () => {
+  const id = await submissionIn('Submitted');
+  const tom = await staff('tom.fletcher'); // an analyst: receives, does not respond
+  assert.equal((await tom.post(`/api/portal-admin/submissions/${id}/acknowledge`, {})).status, 403);
+  assert.equal((await tom.post(`/api/portal-admin/submissions/${id}/decline`, { reason: 'No' })).status, 403);
+  assert.equal((await (await staff('daniel.okafor')).post(`/api/portal-admin/submissions/${id}/receive`, {})).status, 403);
+  const r = await manager.post(`/api/portal-admin/submissions/${id}/decline`, { reason: '  ' });
+  assert.deepEqual([r.status, r.data.code], [400, 'REASON_REQUIRED']);
+  assert.equal((await manager.ok('GET', `/api/portal-admin/submissions/${id}`)).submission.status, 'Submitted');
+});
+
+test('the open Submissions are counted three ways: every open one in the inbox, the person’s to receive on Incoming, the new ones on the badge', async () => {
+  const qa = await staff('daniel.okafor'); // acknowledges and declines, does not receive
+  const counts = async (c) => ({
+    inbox: (await c.ok('GET', '/api/portal-admin/summary')).submissions,
+    badge: (await c.ok('GET', '/api/nav')).portal,
+    incoming: (await c.ok('GET', '/api/intake?tab=incoming')).counts.incoming,
+  });
+  const listed = async (c, id) => ({
+    inbox: (await c.ok('GET', '/api/portal-admin/submissions')).some((x) => x.id === id),
+    incoming: (await c.ok('GET', '/api/intake?tab=incoming')).submissions.some((x) => x.id === id),
+  });
+  const before = { manager: await counts(manager), qa: await counts(qa) };
+  const delta = async (who, c) => Object.fromEntries(Object.entries(await counts(c)).map(([k, n]) => [k, n - before[who][k]]));
+
+  const { id } = await announce('Counted three ways');
+  assert.deepEqual(await delta('manager', manager), { inbox: 1, badge: 1, incoming: 1 }, 'new: in every count');
+  assert.deepEqual(await delta('qa', qa), { inbox: 1, badge: 1, incoming: 0 }, 'QA oversees it but is not offered to receive it');
+  assert.deepEqual(await listed(qa, id), { inbox: true, incoming: false });
+
+  await manager.ok('POST', `/api/portal-admin/submissions/${id}/acknowledge`, {});
+  assert.deepEqual(await delta('manager', manager), { inbox: 1, badge: 0, incoming: 1 }, 'acknowledged: still open, no longer new');
+  assert.deepEqual(await listed(manager, id), { inbox: true, incoming: true });
+
+  await manager.ok('POST', `/api/portal-admin/submissions/${id}/receive`, {});
+  assert.deepEqual(await delta('manager', manager), { inbox: 0, badge: 0, incoming: 0 }, 'received: in no count');
+  assert.deepEqual(await listed(manager, id), { inbox: false, incoming: false });
+});
+
+test('the Portal inbox lists open Submissions newest first, or one status, or all, and refuses an unknown status', async () => {
+  const older = (await announce('Older')).id;
+  const newer = (await announce('Newer')).id;
+  const ids = (await manager.ok('GET', '/api/portal-admin/submissions?status=incoming')).map((x) => x.id);
+  assert.ok(ids.indexOf(newer) < ids.indexOf(older) && ids.indexOf(older) >= 0, 'newest first');
+  assert.deepEqual(ids, (await manager.ok('GET', '/api/portal-admin/submissions')).map((x) => x.id), 'incoming is the default');
+  await manager.ok('POST', `/api/portal-admin/submissions/${older}/decline`, { reason: 'Duplicate' });
+  const declined = await manager.ok('GET', '/api/portal-admin/submissions?status=Declined');
+  assert.ok(declined.some((x) => x.id === older) && declined.every((x) => x.status === 'Declined'));
+  assert.ok((await manager.ok('GET', '/api/portal-admin/submissions?status=all')).some((x) => x.id === older));
+  assert.equal((await manager.get('/api/portal-admin/submissions?status=Lost')).status, 400);
+});
+
 test('method request: client asks → lab sends proposal → project opened for the right client', async () => {
   const laura = await portal(LAURA);
   const q = await laura.ok('POST', '/api/portal/requests', {

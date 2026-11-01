@@ -7,10 +7,11 @@ import { assertCan } from '../auth.js';
 import { testFeasibility } from '../intake-feasibility.js';
 import { HttpError, bad, guard, flags, locks, queued } from '../http.js';
 import { INTAKE_PENDING, INTAKE_HOLD, INTAKE_ACCEPTED, DECISION_ACCEPTED, DECISION_HELD, DECISION_RELEASED, DECISION_REJECTED } from '../lookups.js';
-import { idList, nowIso, today } from '../util.js';
+import { idList, longDate, nowIso, today } from '../util.js';
 import { SAMPLE_QUEUES, SAMPLE_RULES, SAMPLE_SELECT, cancelSampleAndTests } from '../workflow.js';
 import { reviewValues, submissionsOf } from '../intake-values.js';
-import { longDate, postMessage, SUBMISSION_QUEUES, SUBMISSION_RULES } from './portal.js';
+import { postMessage } from '../portal-threads.js';
+import { SUBMISSION_QUEUES, SUBMISSION_RULES } from '../submissions.js';
 
 /**
  * Records who decided what on Sample `s`, when and why, in one transaction with moving it to intake state `intake`.

@@ -1,6 +1,6 @@
 # Client portal
 
-A separate sign-in at `/portal/` where a client's contacts follow their own samples, download issued CoAs, submit samples and message the lab. Each contact only sees their own company's records. Code: `public/portal/portal.js` (hash routes), server `server/routes/portal.js`, staff side `public/js/views/portal-inbox.js`.
+A separate sign-in at `/portal/` where a client's contacts follow their own samples, download issued CoAs, submit samples and message the lab. Each contact only sees their own company's records. Code: `public/portal/portal.js` (hash routes), server `server/routes/portal.js` (Submissions, their moves, rules and counts in `server/submissions.js`), staff side `public/js/views/portal-inbox.js`.
 
 ## Sub-features
 
@@ -27,7 +27,7 @@ A separate sign-in at `/portal/` where a client's contacts follow their own samp
 
 - Open `<base>/portal/` and sign in as a client contact.
 - Navigate with the top nav: `.nav a[data-nav=overview|samples|submit|requests|messages]`. Below desktop width `.nav` is hidden; use `nav.tabbar a[data-nav=…]` instead.
-- Staff see the other side under **Client portal** in the sidebar (`/portal-inbox`). It opens on Messages. Submissions are at `/portal-inbox?tab=submissions` (open ones by default), and a submission's detail is at `/portal-inbox/submissions/<id>`, with Acknowledge, Decline and "Receive samples" (`button[data-act=receive]`) offered from its `can` flags. Acknowledge and Decline need `portal.respond` (manager, QA, scientist, business); Receive needs `samples.receive` (admin, manager, scientist, analyst). On an open submission priya.raman sees all three, tom.fletcher only Receive, and grace.holloway and daniel.okafor get `can.receive: false`, so no "Receive samples". Requests are at `/portal-inbox?tab=requests` and `/portal-inbox/requests/<id>`.
+- Staff see the other side under **Client portal** in the sidebar (`/portal-inbox`). It opens on Messages. Submissions are at `/portal-inbox?tab=submissions`, opening on Incoming: every open one (Submitted or Acknowledged), whoever may act on it, newest first, which the tab count also counts (`GET /api/portal-admin/submissions`, default `status=incoming`; also `Received`, any other status, or `all`), and a submission's detail is at `/portal-inbox/submissions/<id>`, with Acknowledge, Decline and "Receive samples" (`button[data-act=receive]`) offered from its `can` flags. Acknowledge and Decline need `portal.respond` (manager, QA, scientist, business); Receive needs `samples.receive` (admin, manager, scientist, analyst). On an open submission priya.raman sees all three, tom.fletcher only Receive, and grace.holloway and daniel.okafor get `can.receive: false`, so no "Receive samples". Requests are at `/portal-inbox?tab=requests` and `/portal-inbox/requests/<id>`.
 
 ## Driving it with agent-browser
 
@@ -62,7 +62,7 @@ End state that proves it:
 - **Isolation:** a contact from another company (e.g. `felix.romero@bluestone-bio.example`) must not see Acme's records. Under Felix's portal session:
   - GET `/api/portal/samples/<acme id>`, `/samples/<id>/coa`, `/threads/<id>`, `/submissions/<id>` and `/requests/<id>` return 404, and so do POST `/threads/<id>/messages` and POST `/submissions/<id>/withdraw`.
   - His lists hold only Bluestone's rows, and how many depends on the seed date: `/api/portal/samples` defaults to open samples (1 on 2026-10-21, S-2026-0088; it was `[]` earlier), while `?status=all` returns his 3 samples; `/api/portal/submissions` may be empty. Check that no list contains Acme codes or subjects.
-- **Withdraw:** the API then returns `status: "Withdrawn"` and `can.withdraw: false`; the staff list `GET /api/portal-admin/submissions?status=Withdrawn` holds it and the default open list does not; the audit has `STATUS` on `portal_submissions` "Withdrawn by the client". A second withdraw returns 400 ("This submission is withdrawn — contact the laboratory to change it").
+- **Withdraw:** the API then returns `status: "Withdrawn"` and `can.withdraw: false`; the staff list `GET /api/portal-admin/submissions?status=Withdrawn` holds it and the default Incoming list does not; the audit has `STATUS` on `portal_submissions` "Withdrawn by the client". A second withdraw returns 400 ("This submission is withdrawn — contact the laboratory to change it").
 
 ## Gotchas
 
