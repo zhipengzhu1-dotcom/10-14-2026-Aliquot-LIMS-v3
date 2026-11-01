@@ -193,8 +193,11 @@ export function addTestsToSample(ctx, sampleId, methodIds) {
 }
 
 /** The distinct `key` of each Test in the signed-in person's Test Queue `name`: none without its permission, never a refusal. */
+// With `lab`, oversight: the Queue's stage whoever could act on it, which is nobody's Queue.
 function workFilter(ctx, name, key) {
-  return [...new Set(workQueue(TEST_RULES, TEST_QUEUES, name, ctx.user).map((t) => t[key]))];
+  if (ctx.query.lab) assertCan(ctx, 'work.oversee');
+  const tests = ctx.query.lab && Object.hasOwn(TEST_QUEUES, name) ? TEST_QUEUES[name].stage() : workQueue(TEST_RULES, TEST_QUEUES, name, ctx.user);
+  return [...new Set(tests.map((t) => t[key]))];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -326,8 +329,8 @@ export default function routes(r) {
     if (q.status) { const list = String(q.status).split(','); where.push(`t.status IN (${ph(list)})`); params.push(...list); }
     if (q.work) { const ids = workFilter(ctx, q.work, 'id'); where.push(`t.id IN (${ph(ids)})`); params.push(...ids); }
     if (q.analyst_id) { where.push('t.analyst_id = ?'); params.push(+q.analyst_id); }
-    // Cannot be assigned until the Sample is accepted, so not yet unassigned work.
-    if (q.unassigned) { where.push('t.analyst_id IS NULL AND s.intake = ?'); params.push(INTAKE_ACCEPTED); }
+    // Nobody holds the Test: a limit only, so whether it may be assigned yet stays with the work filter's rule.
+    if (q.unassigned) where.push('t.analyst_id IS NULL');
     if (q.method_id) { where.push('t.method_id = ?'); params.push(+q.method_id); }
     if (q.sample_id) { where.push('t.sample_id = ?'); params.push(+q.sample_id); }
     if (q.instrument_id) { where.push('t.instrument_id = ?'); params.push(+q.instrument_id); }

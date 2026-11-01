@@ -22,6 +22,8 @@ export const SURFACES = {
     assigned: { ...workFilters('assigned'), 'Worklist My tests': (c, t) => listed(c, '/api/tests?scope=open&limit=3000&work=assigned', t.testId) },
     review: { ...workFilters('review'), 'Reviews page review list': (c, t) => onReviews(c, 'toReview', t.testId) },
     approval: { ...workFilters('approval'), 'Reviews page approval list': (c, t) => onReviews(c, 'toApprove', t.testId) },
+    assignable: workFilters('assignable'),
+    claimable: workFilters('claimable'),
   },
   SAMPLE_QUEUES: {
     certificate: { 'Reviews page certificate list': (c, s) => onReviews(c, 'toIssue', s) },
