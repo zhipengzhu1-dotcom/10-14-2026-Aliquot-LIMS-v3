@@ -18,7 +18,7 @@ import { clean, nowIso, addDays, today, specText, fixed } from '../util.js';
 import { checkSubmission, submissionContext, clientMethods, openProjects } from '../submission-gate.js';
 import { createThread, postMessage, notice } from '../portal-threads.js';
 import {
-  SUBMISSION_OPEN, SUBMISSION_RULES, CLIENT_SUBMISSION_RULES, SUBMISSION_LIST, SUBMISSION_COUNTS,
+  SUBMISSION_STATUSES, SUBMISSION_OPEN, SUBMISSION_RULES, CLIENT_SUBMISSION_RULES, SUBMISSION_QUEUES, SUBMISSION_LIST, SUBMISSION_COUNTS,
   submitSamples, moveSubmission,
 } from '../submissions.js';
 import { assistantSetting, draftSubmission, modelLabel, readChoice, CHOICES } from '../assistant.js';
@@ -509,13 +509,12 @@ export default function routes(r) {
   }, staff);
 
   // ----- Submissions -----
+  // `incoming` is the Incoming Queue's stage unfiltered, the oversight view of every open Submission; newest first.
   r.get('/api/portal-admin/submissions', (ctx) => {
-    const status = ctx.query.status || 'open';
-    const where = [];
-    const params = [];
-    if (status === 'open') { where.push(`su.status IN (${ph(SUBMISSION_OPEN)})`); params.push(...SUBMISSION_OPEN); }
-    else if (status !== 'all') { where.push('su.status = ?'); params.push(status); }
-    return all(`${SUBMISSION_LIST} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY su.id DESC LIMIT 500`, ...params);
+    const status = ctx.query.status || 'incoming';
+    if (status === 'incoming') return SUBMISSION_QUEUES.incoming.stage().reverse();
+    if (status !== 'all' && !SUBMISSION_STATUSES.includes(status)) throw bad(`Status must be incoming, all or one of: ${SUBMISSION_STATUSES.join(', ')}`);
+    return status === 'all' ? all(`${SUBMISSION_LIST} ORDER BY su.id DESC LIMIT 500`) : all(`${SUBMISSION_LIST} WHERE su.status = ? ORDER BY su.id DESC LIMIT 500`, status);
   }, staff);
 
   r.get('/api/portal-admin/submissions/:id', (ctx) => {
