@@ -258,12 +258,17 @@ async function reviewsAgree(c, label, cans) {
   }
 }
 
-// The Dashboard shows the first dozen of My tests.
+// The Dashboard shows the first dozen of My tests, and each of its counts of Test work is the Worklist view its tile links to.
 async function dashboardAgrees(c, label) {
   const mine = (await c.ok('GET', '/api/tests?scope=open&limit=3000&work=assigned')).map((x) => x.id);
-  const dashboard = (await c.ok('GET', '/api/dashboard')).myTests.map((x) => x.id);
+  const { myTests, kpis } = await c.ok('GET', '/api/dashboard');
+  const dashboard = myTests.map((x) => x.id);
   assert.deepEqual(dashboard.filter((id) => !mine.includes(id)), [], `${label}: Dashboard My tests outside the Worklist`);
   assert.equal(dashboard.length, Math.min(12, mine.length), `${label}: Dashboard My tests vs Worklist`);
+  const listed = async (query) => (await c.ok('GET', `/api/tests?limit=3000&${query}`)).length;
+  assert.equal(kpis.tests_open, await listed('scope=open'), `${label}: Dashboard Tests to do vs Worklist All open`);
+  assert.equal(kpis.tests_overdue, await listed('scope=open&overdue=1'), `${label}: Dashboard overdue vs Worklist Overdue`);
+  assert.equal(kpis.awaiting_review + kpis.awaiting_approval, await listed('scope=review'), `${label}: Dashboard awaiting review / approval vs Worklist In review`);
 }
 
 for (const [state, steps] of Object.entries(TEST_STATES)) {
