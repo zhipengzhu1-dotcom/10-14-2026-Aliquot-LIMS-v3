@@ -12,12 +12,13 @@ import {
 } from '../lookups.js';
 import { clean, cleanAll, nowIso, today, addBusinessDays, dateOf, idList, likeTerm, limitParam, round } from '../util.js';
 import {
-  TEST_SELECT, TEST_QUEUES, TEST_RULES, SAMPLE_SELECT, SAMPLE_QUEUES, SAMPLE_RULES, TEST_OPEN, getTest, isQualified, instrumentProblem, materialProblem, refreshSampleStatus,
+  TEST_SELECT, TEST_QUEUES, TEST_RULES, SAMPLE_SELECT, SAMPLE_QUEUES, SAMPLE_RULES, getTest, isQualified, instrumentProblem, materialProblem, refreshSampleStatus,
   unassignedTests, assignTests, claimTest, startTest, saveResults, submitTest, reviewTest, approveTest, cancelTest, issueReport, cancelSample,
 } from '../workflow.js';
 import { intakeHistory } from '../intake-values.js';
 import { acceptedWithChanges } from '../intake-changes.js';
 import { INVESTIGATION_RULES } from '../investigations.js';
+import { TEST_WORK } from '../test-work.js';
 import { methodProblem } from '../intake-feasibility.js';
 import { PROJECT_RULES } from './business.js';
 import { ENTRY_QUEUES, ENTRY_RULES } from '../notebook.js';
@@ -320,9 +321,12 @@ export default function routes(r) {
     const q = ctx.query;
     const where = [];
     const params = [];
-    if (q.scope === 'open') { where.push(`t.status IN (${ph(TEST_OPEN)})`); params.push(...TEST_OPEN); }
-    // Tests on a Sample still waiting for intake review are not work yet, so no list of open or late work shows them.
-    if (q.scope === 'open' || q.overdue) { where.push('s.intake = ?'); params.push(INTAKE_ACCEPTED); }
+    // The Worklist's views of Test work list the same Tests the Dashboard and Workload count (server/test-work.js).
+    const views = [];
+    if (q.scope === 'open') views.push(TEST_WORK.open());
+    if (q.scope === 'review') views.push(Object.values(TEST_WORK.inReview()).flat());
+    if (q.overdue) views.push(TEST_WORK.overdue());
+    for (const ids of views.map((rows) => rows.map((t) => t.id))) { where.push(`t.id IN (${ph(ids)})`); params.push(...ids); }
     if (q.status) { const list = String(q.status).split(','); where.push(`t.status IN (${ph(list)})`); params.push(...list); }
     if (q.work) { const ids = workFilter(ctx, q.work, 'id'); where.push(`t.id IN (${ph(ids)})`); params.push(...ids); }
     if (q.analyst_id) { where.push('t.analyst_id = ?'); params.push(+q.analyst_id); }
@@ -331,7 +335,6 @@ export default function routes(r) {
     if (q.method_id) { where.push('t.method_id = ?'); params.push(+q.method_id); }
     if (q.sample_id) { where.push('t.sample_id = ?'); params.push(+q.sample_id); }
     if (q.instrument_id) { where.push('t.instrument_id = ?'); params.push(+q.instrument_id); }
-    if (q.overdue) { where.push(`t.due_date < ? AND t.status IN (${ph(TEST_OPEN)})`); params.push(today(), ...TEST_OPEN); }
     if (q.q) {
       const t = likeTerm(q.q);
       where.push(`(t.code LIKE ? ESCAPE '\\' OR s.code LIKE ? ESCAPE '\\' OR m.code LIKE ? ESCAPE '\\' OR m.title LIKE ? ESCAPE '\\' OR s.description LIKE ? ESCAPE '\\')`);
