@@ -29,6 +29,8 @@ export const SURFACES = {
     intake: { 'Receiving & Review Pending review and On hold tabs': (c, s) => onIntake(c, ['pending', 'hold'], s) },
     ready: { 'Receiving & Review Ready to assign tab': (c, s) => onIntake(c, ['ready'], s) },
   },
+  // The Portal inbox's Incoming list is this Queue's stage unfiltered (oversight), and the Client portal badge counts new
+  // Submissions, not a Queue (see SUBMISSION_COUNTS in server/submissions.js); neither is a surface of it.
   SUBMISSION_QUEUES: {
     incoming: { 'Receiving & Review Incoming tab': (c, id) => onIncoming(c, id) },
   },
