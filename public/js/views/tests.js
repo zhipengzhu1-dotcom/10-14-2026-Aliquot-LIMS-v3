@@ -21,8 +21,8 @@ export async function assignDialog(testIds, tests) {
   const methodCodes = [...new Set(tests.map((t) => t.method_code))];
   const { users, qualifications } = await api.get('/api/qualifications');
   const qualified = (uid) => methodCodes.every((code) => qualifications.some((q) => q.user_id === uid && q.method_code === code && (!q.expires_at || q.expires_at >= todayIso())));
-  const load = await api.get('/api/tests', { scope: 'open' });
-  const openCount = (uid) => load.filter((t) => t.analyst_id === uid && ['Pending', 'In Progress'].includes(t.status)).length;
+  const load = await api.get('/api/tests', { scope: 'open', limit: 3000 });
+  const openCount = (uid) => load.filter((t) => t.analyst_id === uid).length;
   const ranked = users.map((u) => ({ ...u, ok: qualified(u.id), open: openCount(u.id) })).sort((a, b) => (b.ok - a.ok) || (a.open - b.open));
   return openForm({
     title: `Assign ${plural(testIds.length, 'test')}`,
@@ -63,7 +63,7 @@ export async function worklist(ctx) {
   if (view === 'mine') params.work = 'assigned';
   if (view === 'unassigned') { delete params.scope; Object.assign(params, { work: unassigned.work, lab: unassigned.lab, unassigned: 1 }); }
   if (view === 'overdue') params.overdue = 1;
-  if (view === 'review') { delete params.scope; params.status = 'Submitted,Reviewed'; }
+  if (view === 'review') params.scope = 'review';
   const [rows, methods] = await Promise.all([api.get('/api/tests', params), api.get('/api/methods')]);
   const analysts = activeUsers(state.lookups.testPerformerRoles);
 

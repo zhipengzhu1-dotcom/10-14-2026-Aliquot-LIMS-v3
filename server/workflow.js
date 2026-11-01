@@ -15,6 +15,7 @@ import { clean, nowIso, today, idList, round, sameValue, fixed, specText } from 
 import { openSampleInvestigation, openTestInvestigation, raiseInvestigation } from './investigations.js';
 
 export const TEST_EDITABLE = ['Pending', 'In Progress'];
+// Not yet approved or cancelled. Test work's open view is narrower: Pending or In Progress (server/test-work.js).
 export const TEST_OPEN = ['Pending', 'In Progress', 'Submitted', 'Reviewed'];
 export const TEST_SUBMITTED = ['Submitted', 'Reviewed', 'Approved'];
 const RETURN_MEANINGS = ['test.review.return', 'test.approve.reject'].map((a) => SIGNATURE_MEANINGS[a].meaning);
@@ -105,8 +106,11 @@ function approvalRule(t, me) {
   if (t.reviewed_by === me.id) return forbidden('You reviewed this test — approval must come from a different person');
 }
 
+/** Not work until accepted: Test `t` is lab work only once intake review has accepted its Sample. */
+export const acceptedAtIntake = (t) => t.sample_intake === INTAKE_ACCEPTED;
+
 /** Refuses work on a Test whose Sample intake review has not accepted. */
-const intakeGate = (t) => (t.sample_intake === INTAKE_ACCEPTED ? undefined : bad(`${t.sample_code} has not been accepted at intake review yet — accept it before its tests are assigned or picked up`));
+const intakeGate = (t) => (acceptedAtIntake(t) ? undefined : bad(`${t.sample_code} has not been accepted at intake review yet — accept it before its tests are assigned or picked up`));
 
 export const TEST_RULES = {
   assign(t, me) {

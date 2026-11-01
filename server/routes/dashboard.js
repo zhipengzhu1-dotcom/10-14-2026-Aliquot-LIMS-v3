@@ -5,7 +5,8 @@ import { can } from '../auth.js';
 import { SAMPLE_OPEN, rolesWith } from '../lookups.js';
 import { today, addDays, now, localDate } from '../util.js';
 import { queued } from '../http.js';
-import { TEST_SELECT, TEST_EDITABLE, TEST_OPEN, TEST_QUEUES, TEST_RULES, TEST_RETURNED, unassignedWork } from '../workflow.js';
+import { TEST_SELECT, TEST_OPEN, TEST_QUEUES, TEST_RULES, TEST_RETURNED, unassignedWork } from '../workflow.js';
+import { TEST_WORK } from '../test-work.js';
 import { INVESTIGATION_OPEN } from '../investigations.js';
 import { ENTRY_QUEUES, ENTRY_RULES } from '../notebook.js';
 
@@ -39,18 +40,19 @@ export default function routes(r) {
     const kpis = get(`SELECT
       (SELECT COUNT(*) FROM samples WHERE status IN (${ph(SAMPLE_OPEN)})) AS samples_in_lab,
       (SELECT COUNT(*) FROM samples WHERE received_at >= ?) AS received_7d,
-      (SELECT COUNT(*) FROM tests WHERE status IN (${ph(TEST_EDITABLE)})) AS tests_open,
-      (SELECT COUNT(*) FROM tests WHERE status IN (${ph(TEST_OPEN)}) AND due_date < ?) AS tests_overdue,
-      (SELECT COUNT(*) FROM tests WHERE status = 'Submitted') AS awaiting_review,
-      (SELECT COUNT(*) FROM tests WHERE status = 'Reviewed') AS awaiting_approval,
       (SELECT COUNT(*) FROM investigations v WHERE ${INVESTIGATION_OPEN}) AS open_investigations,
       (SELECT COUNT(*) FROM samples WHERE reported_at >= ?) AS reported_90d,
       (SELECT COUNT(*) FROM samples WHERE reported_at >= ? AND substr(reported_at, 1, 10) <= due_date) AS on_time_90d,
       (SELECT AVG(julianday(reported_at) - julianday(received_at)) FROM samples WHERE reported_at >= ?) AS avg_tat_90d`,
-    ...SAMPLE_OPEN, new Date(Date.parse(`${addDays(t, -7)}T00:00:00`)).toISOString(), ...TEST_EDITABLE, ...TEST_OPEN, t, since90, since90, since90);
+    ...SAMPLE_OPEN, new Date(Date.parse(`${addDays(t, -7)}T00:00:00`)).toISOString(), since90, since90, since90);
     // The person's own unassigned Tests, the same ones their Worklist lists, and which Queue they came from.
     const unassigned = unassignedWork(me);
     kpis.unassigned = { queue: unassigned.queue, n: unassigned.tests.length };
+    // Each count of Test work is the length of the Worklist view its tile links to.
+    const open = TEST_WORK.open();
+    const overdue = TEST_WORK.overdue(open);
+    const { review, approval } = TEST_WORK.inReview();
+    Object.assign(kpis, { tests_open: open.length, tests_overdue: overdue.length, awaiting_review: review.length, awaiting_approval: approval.length });
 
     if (money) {
       const monthStart = `${t.slice(0, 7)}-01`;
@@ -92,13 +94,10 @@ export default function routes(r) {
       myReturned: all(`${TEST_SELECT} WHERE t.analyst_id = ? AND ${RETURNED_SQL}`, me.id, ...RETURNED_PARAMS).map((x) => x.id),
       myDrafts: queued(ENTRY_RULES, ENTRY_QUEUES.drafts, me).slice(0, 5),
       alerts,
-      pipeline: all(`SELECT status, COUNT(*) AS n FROM tests WHERE status IN (${ph(TEST_OPEN)}) GROUP BY status`, ...TEST_OPEN),
-      workload: all(`SELECT u.id, u.full_name, u.initials,
-          SUM(CASE WHEN t.status IN (${ph(TEST_EDITABLE)}) THEN 1 ELSE 0 END) AS open,
-          SUM(CASE WHEN t.status IN (${ph(TEST_EDITABLE)}) AND t.due_date < ? THEN 1 ELSE 0 END) AS overdue
-        FROM users u LEFT JOIN tests t ON t.analyst_id = u.id
-        WHERE u.active = 1 AND u.role IN (${ph(rolesWith('tests.perform'))})
-        GROUP BY u.id ORDER BY open DESC, u.full_name`, ...TEST_EDITABLE, ...TEST_EDITABLE, t, ...rolesWith('tests.perform')),
+      pipeline: TEST_OPEN.map((status) => ({ status, n: [...open, ...review, ...approval].filter((x) => x.status === status).length })).filter((x) => x.n),
+      workload: all(`SELECT id, full_name, initials FROM users WHERE active = 1 AND role IN (${ph(rolesWith('tests.perform'))})`, ...rolesWith('tests.perform'))
+        .map((u) => ({ ...u, open: TEST_WORK.load(u.id, open).length, overdue: TEST_WORK.load(u.id, overdue).length }))
+        .sort((a, b) => b.open - a.open || a.full_name.localeCompare(b.full_name)),
       dueSoon: all(`SELECT s.id, s.code, s.description, s.due_date, s.status, s.priority, c.code AS client_code,
           (SELECT COUNT(*) FROM tests x WHERE x.sample_id = s.id AND x.status != 'Cancelled') AS test_count,
           (SELECT COUNT(*) FROM tests x WHERE x.sample_id = s.id AND x.status = 'Approved') AS tests_approved
