@@ -30,7 +30,7 @@ export async function list(ctx) {
   ctx.title('Workload');
   const d = await api.get('/api/workload');
   const total = (key) => d.analysts.reduce((n, a) => n + a[key], 0);
-  const overdue = total('overdue');
+  const overdue = d.overdue;
   const returned = total('returned');
   const max = Math.max(1, ...d.analysts.map(loadOf));
   ctx.el.innerHTML = String(html`
@@ -40,8 +40,8 @@ export async function list(ctx) {
       actions: can('tests.assign') ? html`<a class="btn primary" href="/worklist?view=unassigned">${icon('users', { size: 15 })}Assign work</a>` : '',
     })}
     <div class="kpis">
-      <a class="kpi" href="/worklist"><div class="k-label">${icon('worklist', { size: 14 })}Open tests</div><div class="k-value">${num(total('open'))}</div><div class="k-sub">${num(total('in_progress'))} in progress · ${num(total('due_week'))} due in 7 days</div></a>
-      <a class="kpi ${overdue ? 'alert' : ''}" href="/worklist?view=overdue"><div class="k-label">${icon('clock', { size: 14 })}Overdue</div><div class="k-value">${num(overdue)}</div><div class="k-sub">Assigned and past their due date</div></a>
+      <a class="kpi" href="/worklist?view=all"><div class="k-label">${icon('worklist', { size: 14 })}Open tests</div><div class="k-value">${num(d.open)}</div><div class="k-sub">${num(total('in_progress'))} in progress · ${num(total('due_week'))} due in 7 days</div></a>
+      <a class="kpi ${overdue ? 'alert' : ''}" href="/worklist?view=overdue"><div class="k-label">${icon('clock', { size: 14 })}Overdue</div><div class="k-value">${num(overdue)}</div><div class="k-sub">Past their due date, assigned or not</div></a>
       <a class="kpi ${d.unassigned ? 'warn' : ''}" href="/worklist?view=unassigned"><div class="k-label">${icon('inbox', { size: 14 })}Unassigned</div><div class="k-value">${num(d.unassigned)}</div><div class="k-sub">Pending tests with no analyst</div></a>
       <div class="kpi ${returned ? 'warn' : ''}"><div class="k-label">${icon('undo', { size: 14 })}Returned</div><div class="k-value">${num(returned)}</div><div class="k-sub">Sent back by a reviewer or QA</div></div>
     </div>
