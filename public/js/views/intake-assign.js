@@ -1,11 +1,9 @@
-// Receiving & Review, assigning: the dialog that gives the Tests of one or several accepted Samples to an analyst, and
-// the card that reports an outcome for every Test. The server decides which Samples are offered assign (`can.assign`),
+// Receiving & Review, assigning: the dialog that gives the Tests of one or several accepted Samples to an analyst (the
+// Assign action in intake-actions.js opens it). The server decides which Samples are offered assign (`can.assign`),
 // which Tests can be assigned and who is qualified; this file carries no status or qualification check of its own.
 import { html } from '../core/html.js';
 import { api } from '../core/api.js';
-import { refreshNav } from '../core/nav.js';
-import { plural, badge, field, openForm, toast } from '../core/ui.js';
-import { showOutcomes } from './intake-outcomes.js';
+import { plural, badge, field, openForm } from '../core/ui.js';
 
 /** Analysts in the order they are best offered the work: qualified on the most Methods first, then the lightest workload. */
 function ranked(options) {
@@ -43,18 +41,3 @@ export async function assignDialog(sampleIds) {
     },
   });
 }
-
-export const assignAction = {
-  key: 'assign',
-  label: 'Assign',
-  icon: 'users',
-  bulk: true,
-  async run({ ids, outcomes, after }) {
-    const r = await assignDialog(ids);
-    if (!r?.results) return;
-    toast(`${plural(r.assigned, 'test')} assigned${r.refused ? `, ${r.refused} refused` : ''}`, r.refused ? 'info' : 'success');
-    refreshNav();
-    await after();
-    showOutcomes(outcomes, { noun: 'test', verb: 'assigned', done: 'Assigned', rows: r.results.map((x) => ({ label: `${x.sample_code ?? `#${x.sample_id}`} ${x.method_code ?? ''}`.trim(), ok: x.ok, error: x.error })) });
-  },
-};
